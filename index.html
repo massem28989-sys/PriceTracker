@@ -337,9 +337,20 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       <button class="btn btn-ghost" id="exportSettlementBtn" style="padding:6px 14px;font-size:12px;">تصدير كل الموردين Excel</button>
     </div>
     <p class="hint">الإجماليات هنا شاملة الضريبة (المبلغ الفعلي اللي بتدفعه للمورد) — مختلفة عن أسعار المتابعة في تبويب "المنتجات" اللي دايمًا قبل الضريبة عشان تفضل المقارنة صحيحة.</p>
-    <select id="settlementSupplierSelect" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:14px;background:var(--paper-raised);margin-bottom:14px;">
-      <option value="">اختار مورد</option>
-    </select>
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+      <select id="settlementSupplierSelect" style="flex:2;min-width:200px;padding:9px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:14px;background:var(--paper-raised);">
+        <option value="">اختار مورد</option>
+      </select>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">من</label>
+        <input type="date" id="settlementFromDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">إلى</label>
+        <input type="date" id="settlementToDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+      </div>
+      <button class="btn btn-ghost" id="clearSettlementDatesBtn" style="font-size:12px;">كل الفترات</button>
+    </div>
     <div id="settlementTable"></div>
 
     <div class="section-title owner-only"><span>مطابقة كشف حساب المورد</span></div>
@@ -675,6 +686,9 @@ const els = {
   tabSettlementBtn: document.getElementById('tabSettlementBtn'),
   exportSettlementBtn: document.getElementById('exportSettlementBtn'),
   settlementSupplierSelect: document.getElementById('settlementSupplierSelect'),
+  settlementFromDate: document.getElementById('settlementFromDate'),
+  settlementToDate: document.getElementById('settlementToDate'),
+  clearSettlementDatesBtn: document.getElementById('clearSettlementDatesBtn'),
   settlementTable: document.getElementById('settlementTable'),
   statementDropzone: document.getElementById('statementDropzone'),
   statementFileInput: document.getElementById('statementFileInput'),
@@ -1676,8 +1690,21 @@ els.tabSettlementBtn.addEventListener('click', ()=>{
   renderSettlement();
 });
 
-function computeSettlementRows(supplierName){
-  return invoices.filter(inv => inv.store === supplierName).map(inv => {
+function normalizeInvoiceNumber(s){
+  // بيشيل أي بادئة/رموز (INV-, #, مسافات) والأصفار البادئة عشان "7410" تتطابق
+  // مع "INV-007410" أو "Invoice #7410" أو أي صيغة تانية لنفس الرقم
+  const raw = (s||'').toString().trim();
+  const digits = raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  return digits || raw.toUpperCase();
+}
+
+function computeSettlementRows(supplierName, fromDate, toDate){
+  return invoices.filter(inv => {
+    if(inv.store !== supplierName) return false;
+    if(fromDate && (!inv.date || inv.date < fromDate)) return false;
+    if(toDate && (!inv.date || inv.date > toDate)) return false;
+    return true;
+  }).map(inv => {
     const subtotal = (inv.items||[]).reduce((s,it)=> s + (Number(it.price)||0), 0);
     const vatRate = (inv.vatRate === undefined || inv.vatRate === null || isNaN(Number(inv.vatRate))) ? 5 : Number(inv.vatRate);
     const vat = subtotal * vatRate / 100;
@@ -1696,13 +1723,15 @@ function populateSettlementSupplierSelect(){
 function renderSettlement(){
   populateSettlementSupplierSelect();
   const supplier = els.settlementSupplierSelect.value;
+  const fromDate = els.settlementFromDate.value || '';
+  const toDate = els.settlementToDate.value || '';
   if(!supplier){
     els.settlementTable.innerHTML = `<div class="empty-state">اختار مورد من القايمة فوق عشان تشوف تسويته.</div>`;
     return;
   }
-  const rows = computeSettlementRows(supplier);
+  const rows = computeSettlementRows(supplier, fromDate, toDate);
   if(rows.length === 0){
-    els.settlementTable.innerHTML = `<div class="empty-state">مفيش فواتير لهذا المورد.</div>`;
+    els.settlementTable.innerHTML = `<div class="empty-state">مفيش فواتير لهذا المورد${(fromDate||toDate)?' في الفترة المحددة':''}.</div>`;
     return;
   }
   const grandSubtotal = rows.reduce((s,r)=> s+r.subtotal, 0);
@@ -1739,6 +1768,13 @@ els.settlementSupplierSelect.addEventListener('change', ()=>{
   els.statementStatus.innerHTML = '';
   renderSettlement();
 });
+els.settlementFromDate.addEventListener('change', renderSettlement);
+els.settlementToDate.addEventListener('change', renderSettlement);
+els.clearSettlementDatesBtn.addEventListener('click', ()=>{
+  els.settlementFromDate.value = '';
+  els.settlementToDate.value = '';
+  renderSettlement();
+});
 
 function sanitizeSheetName(name, usedNames){
   let clean = (name || 'مورد').replace(/[:\\\/?*\[\]]/g, ' ').trim().substring(0,31) || 'مورد';
@@ -1753,10 +1789,13 @@ function sanitizeSheetName(name, usedNames){
 els.exportSettlementBtn.addEventListener('click', ()=>{
   const suppliers = [...new Set(invoices.map(inv => inv.store).filter(Boolean))].sort((a,b)=> a.localeCompare(b,'ar'));
   if(suppliers.length === 0){ alert('مفيش موردين لتصديرهم.'); return; }
+  const fromDate = els.settlementFromDate.value || '';
+  const toDate = els.settlementToDate.value || '';
   const wb = XLSX.utils.book_new();
   const usedNames = new Set();
   suppliers.forEach(supplier=>{
-    const rows = computeSettlementRows(supplier);
+    const rows = computeSettlementRows(supplier, fromDate, toDate);
+    if(rows.length === 0) return;
     const grandSubtotal = rows.reduce((s,r)=> s+r.subtotal, 0);
     const grandVat = rows.reduce((s,r)=> s+r.vat, 0);
     const grandTotal = rows.reduce((s,r)=> s+r.total, 0);
@@ -1778,7 +1817,9 @@ els.exportSettlementBtn.addEventListener('click', ()=>{
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), sanitizeSheetName(supplier, usedNames));
   });
-  XLSX.writeFile(wb, 'تسوية-الموردين.xlsx');
+  if(wb.SheetNames.length === 0){ alert('مفيش فواتير في الفترة المحددة.'); return; }
+  const fileLabel = (fromDate||toDate) ? `تسوية-الموردين-${fromDate||'البداية'}-الى-${toDate||'الآن'}.xlsx` : 'تسوية-الموردين.xlsx';
+  XLSX.writeFile(wb, fileLabel);
 });
 
 // ---------- statement upload & auto-match ----------
@@ -1819,12 +1860,12 @@ async function extractStatementData(images){
   };
 }
 
-function compareStatementToRecords(statementItems, supplierName){
-  const ourRows = computeSettlementRows(supplierName);
+function compareStatementToRecords(statementItems, supplierName, fromDate, toDate){
+  const ourRows = computeSettlementRows(supplierName, fromDate, toDate);
   const ourByNumber = new Map();
   const ourByDate = new Map();
   ourRows.forEach(r=>{
-    if(r.invoiceNumber) ourByNumber.set(normName(r.invoiceNumber).toUpperCase(), r);
+    if(r.invoiceNumber) ourByNumber.set(normalizeInvoiceNumber(r.invoiceNumber), r);
     if(r.date){
       if(!ourByDate.has(r.date)) ourByDate.set(r.date, []);
       ourByDate.get(r.date).push(r);
@@ -1833,13 +1874,14 @@ function compareStatementToRecords(statementItems, supplierName){
 
   const matchedOurIds = new Set();
   const results = statementItems.map(stmt=>{
-    let ourMatch = null;
-    const numKey = stmt.invoiceNumber ? normName(stmt.invoiceNumber).toUpperCase() : '';
+    let ourMatch = null, matchedBy = '';
+    const numKey = stmt.invoiceNumber ? normalizeInvoiceNumber(stmt.invoiceNumber) : '';
     if(numKey && ourByNumber.has(numKey)){
       ourMatch = ourByNumber.get(numKey);
+      matchedBy = 'number';
     }else if(stmt.date && ourByDate.has(stmt.date)){
       const candidates = ourByDate.get(stmt.date).filter(r=> !matchedOurIds.has(r.id));
-      if(candidates.length === 1) ourMatch = candidates[0];
+      if(candidates.length === 1){ ourMatch = candidates[0]; matchedBy = 'date'; }
     }
     if(ourMatch) matchedOurIds.add(ourMatch.id);
     const diff = ourMatch ? (ourMatch.total - stmt.total) : null;
@@ -1847,11 +1889,11 @@ function compareStatementToRecords(statementItems, supplierName){
     if(!ourMatch) status = 'missing_in_app';
     else if(Math.abs(diff) < 0.5) status = 'match';
     else status = 'mismatch';
-    return { invoiceNumber: stmt.invoiceNumber, date: stmt.date, total: stmt.total, ourTotal: ourMatch ? ourMatch.total : null, diff, status };
+    return { invoiceNumber: stmt.invoiceNumber, date: stmt.date, total: stmt.total, ourTotal: ourMatch ? ourMatch.total : null, diff, status, matchedBy };
   });
 
   const extraOurRows = ourRows.filter(r => !matchedOurIds.has(r.id)).map(r=> ({
-    invoiceNumber: r.invoiceNumber, date: r.date, total: null, ourTotal: r.total, diff: null, status: 'missing_in_statement'
+    invoiceNumber: r.invoiceNumber, date: r.date, total: null, ourTotal: r.total, diff: null, status: 'missing_in_statement', matchedBy: ''
   }));
 
   return [...results, ...extraOurRows].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -1865,6 +1907,7 @@ function renderStatementComparison(rows){
     missing_in_app: '<span style="color:var(--brick);font-weight:600;">✗ مش موجودة عندنا</span>',
     missing_in_statement: '<span style="color:var(--steel);font-weight:600;">✗ مش في كشف المورد</span>'
   };
+  const matchByNote = { date: ' <span style="font-size:10px;color:var(--ink-soft);">(بالتاريخ، راجعها)</span>', number: '', '': '' };
   els.statementCompareResult.innerHTML = `
     <table class="items">
       <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>إجمالي الكشف</th><th>إجمالي عندنا</th><th>الفرق</th><th>الحالة</th></tr></thead>
@@ -1875,7 +1918,7 @@ function renderStatementComparison(rows){
           <td class="mono" style="padding:8px 4px;">${(r.total!==null&&r.total!==undefined)?fmtPrice(r.total):'—'}</td>
           <td class="mono" style="padding:8px 4px;">${(r.ourTotal!==null&&r.ourTotal!==undefined)?fmtPrice(r.ourTotal):'—'}</td>
           <td class="mono" style="padding:8px 4px;">${(r.diff!==null&&r.diff!==undefined&&Math.abs(r.diff)>=0.5)?fmtPrice(r.diff):'—'}</td>
-          <td style="padding:8px 4px;">${statusLabel[r.status]}</td>
+          <td style="padding:8px 4px;">${statusLabel[r.status]}${matchByNote[r.matchedBy]||''}</td>
         </tr>`).join('')}
       </tbody>
     </table>`;
@@ -1899,7 +1942,7 @@ els.statementFileInput.addEventListener('change', async ()=>{
     else images = [await fileToBase64(file)];
     els.statementStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري التحليل والمطابقة...</div>`;
     const extracted = await extractStatementData(images);
-    const compared = compareStatementToRecords(extracted.items, supplier);
+    const compared = compareStatementToRecords(extracted.items, supplier, els.settlementFromDate.value || '', els.settlementToDate.value || '');
     renderStatementComparison(compared);
     const issues = compared.filter(r=> r.status !== 'match').length;
     els.statementStatus.innerHTML = issues === 0
@@ -2192,7 +2235,7 @@ function appendDraftCard(data, label){
         <div class="nameSuggestion"></div>
       </div>
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" class="dateField" value="${escapeHtml(data.date||'')}"></div>
-      <div class="field" style="max-width:130px;"><label>رقم الفاتورة</label><input type="text" class="invoiceNumberField" value="${escapeHtml(data.invoiceNumber||'')}" placeholder="مثال: 7410"></div>
+      <div class="field" style="max-width:130px;"><label>رقم الفاتورة</label><input type="text" class="invoiceNumberField" value="${escapeHtml(data.invoiceNumber||'')}" placeholder="مثال: 7410"><div class="nameSuggestion"></div></div>
       <div class="field" style="max-width:110px;"><label>نسبة الضريبة %</label><input type="text" class="vatRateField num" value="${initialVat}"></div>
     </div>
     <table class="items">
@@ -2229,6 +2272,20 @@ els.draftsContainer.addEventListener('click', (e)=>{
     return;
   }
 });
+function checkInvoiceNumberDuplicate(input){
+  const box = input.nextElementSibling;
+  if(!box || !box.classList || !box.classList.contains('nameSuggestion')) return;
+  const card = input.closest('.draft-card');
+  const storeVal = card ? (card.querySelector('.storeField').value || '').trim() : '';
+  const numVal = input.value.trim();
+  if(!numVal || !storeVal){ box.innerHTML = ''; return; }
+  const normNum = normalizeInvoiceNumber(numVal);
+  const dup = invoices.find(inv => inv.store === storeVal && inv.invoiceNumber && normalizeInvoiceNumber(inv.invoiceNumber) === normNum);
+  box.innerHTML = dup
+    ? `⚠ فاتورة بنفس الرقم من ${escapeHtml(storeVal)} مسجّلة بالفعل بتاريخ ${escapeHtml(dup.date||'—')} — تأكد إنها مش تكرار`
+    : '';
+}
+
 els.draftsContainer.addEventListener('focusout', (e)=>{
   if(e.target.classList && e.target.classList.contains('nameInput')) checkNameSuggestion(e.target);
   if(e.target.classList && e.target.classList.contains('storeField')){
@@ -2238,7 +2295,11 @@ els.draftsContainer.addEventListener('focusout', (e)=>{
       const vatInput = card && card.querySelector('.vatRateField');
       if(vatInput) vatInput.value = supplierVatRatesMap.get(e.target.value.trim());
     }
+    const card2 = e.target.closest('.draft-card');
+    const numInput = card2 && card2.querySelector('.invoiceNumberField');
+    if(numInput && numInput.value.trim()) checkInvoiceNumberDuplicate(numInput);
   }
+  if(e.target.classList && e.target.classList.contains('invoiceNumberField')) checkInvoiceNumberDuplicate(e.target);
 });
 
 // ---------- edit a saved invoice ----------
