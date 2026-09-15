@@ -509,6 +509,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     <div class="field-row">
       <div class="field"><label>اسم المورد/المتجر</label><input type="text" id="editStoreField"></div>
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" id="editDateField"></div>
+      <div class="field" style="max-width:130px;"><label>رقم الفاتورة</label><input type="text" id="editInvoiceNumberField"></div>
       <div class="field" style="max-width:110px;"><label>نسبة الضريبة %</label><input type="text" id="editVatRateField" class="num"></div>
     </div>
     <table class="items">
@@ -677,6 +678,7 @@ const els = {
   editStoreField: document.getElementById('editStoreField'),
   editDateField: document.getElementById('editDateField'),
   editVatRateField: document.getElementById('editVatRateField'),
+  editInvoiceNumberField: document.getElementById('editInvoiceNumberField'),
   editItemsBody: document.getElementById('editItemsBody'),
   editAddRowBtn: document.getElementById('editAddRowBtn'),
   saveEditInvoiceBtn: document.getElementById('saveEditInvoiceBtn'),
@@ -1026,7 +1028,7 @@ async function refreshInvoicesFromServer(){
   if(!currentWorkspace){ invoices = []; return; }
   const { data, error } = await sb
     .from('invoices')
-    .select('id, store, invoice_date, vat_rate, invoice_items(id, name, barcode, price, qty, unit)')
+    .select('id, store, invoice_date, vat_rate, invoice_number, invoice_items(id, name, barcode, price, qty, unit)')
     .eq('workspace_id', currentWorkspace.id)
     .order('invoice_date', { ascending: true });
   if(error){ console.error(error); invoices = []; return; }
@@ -1035,16 +1037,21 @@ async function refreshInvoicesFromServer(){
     store: r.store || '',
     date: r.invoice_date || '',
     vatRate: (r.vat_rate === null || r.vat_rate === undefined) ? 5 : Number(r.vat_rate),
+    invoiceNumber: r.invoice_number || '',
     items: (r.invoice_items || []).map(it => ({
       id: it.id, name: it.name, barcode: it.barcode || '', price: Number(it.price), qty: Number(it.qty) || 1, unit: it.unit || ''
     }))
   }));
 }
 
-async function insertInvoiceRemote(store, date, items, vatRate){
+async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber){
   const { data: invRow, error: invErr } = await sb
     .from('invoices')
-    .insert({ workspace_id: currentWorkspace.id, user_id: currentUser.id, store: store || null, invoice_date: date || null, vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate })
+    .insert({
+      workspace_id: currentWorkspace.id, user_id: currentUser.id, store: store || null, invoice_date: date || null,
+      vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate,
+      invoice_number: invoiceNumber || null
+    })
     .select()
     .single();
   if(invErr) throw invErr;
@@ -1060,10 +1067,11 @@ async function deleteInvoiceRemote(id){
   if(error) console.error(error);
 }
 
-async function updateInvoiceRemote(id, store, date, items, vatRate){
+async function updateInvoiceRemote(id, store, date, items, vatRate, invoiceNumber){
   const { error: e1 } = await sb.from('invoices').update({
     store: store || null, invoice_date: date || null,
-    vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate
+    vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate,
+    invoice_number: invoiceNumber || null
   }).eq('id', id);
   if(e1) throw e1;
   const { error: e2 } = await sb.from('invoice_items').delete().eq('invoice_id', id);
@@ -1658,7 +1666,7 @@ function computeSettlementRows(supplierName){
     const subtotal = (inv.items||[]).reduce((s,it)=> s + (Number(it.price)||0), 0);
     const vatRate = (inv.vatRate === undefined || inv.vatRate === null || isNaN(Number(inv.vatRate))) ? 5 : Number(inv.vatRate);
     const vat = subtotal * vatRate / 100;
-    return { id: inv.id, date: inv.date || '', subtotal, vatRate, vat, total: subtotal + vat };
+    return { id: inv.id, date: inv.date || '', invoiceNumber: inv.invoiceNumber || '', subtotal, vatRate, vat, total: subtotal + vat };
   }).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
 }
 
@@ -1688,10 +1696,11 @@ function renderSettlement(){
   els.settlementTable.innerHTML = `
     <table class="items">
       <thead><tr>
-        <th>التاريخ</th><th>الإجمالي قبل الضريبة</th><th>نسبة الضريبة</th><th>الضريبة</th><th>الإجمالي شامل الضريبة</th>
+        <th>رقم الفاتورة</th><th>التاريخ</th><th>الإجمالي قبل الضريبة</th><th>نسبة الضريبة</th><th>الضريبة</th><th>الإجمالي شامل الضريبة</th>
       </tr></thead>
       <tbody>
         ${rows.map(r=> `<tr>
+          <td class="mono" style="padding:8px 4px;">${escapeHtml(r.invoiceNumber||'—')}</td>
           <td style="padding:8px 4px;">${escapeHtml(r.date||'—')}</td>
           <td class="mono" style="padding:8px 4px;">${fmtPrice(r.subtotal)}</td>
           <td class="mono" style="padding:8px 4px;">${fmtPrice(r.vatRate)}%</td>
@@ -1701,7 +1710,7 @@ function renderSettlement(){
       </tbody>
       <tfoot>
         <tr style="font-weight:700;border-top:2px solid var(--ink);">
-          <td style="padding:10px 4px;">الإجمالي الكلي</td>
+          <td colspan="2" style="padding:10px 4px;">الإجمالي الكلي</td>
           <td class="mono" style="padding:10px 4px;">${fmtPrice(grandSubtotal)}</td>
           <td></td>
           <td class="mono" style="padding:10px 4px;">${fmtPrice(grandVat)}</td>
@@ -1733,6 +1742,7 @@ els.exportSettlementBtn.addEventListener('click', ()=>{
     const grandVat = rows.reduce((s,r)=> s+r.vat, 0);
     const grandTotal = rows.reduce((s,r)=> s+r.total, 0);
     const sheetRows = rows.map(r=> ({
+      'رقم الفاتورة': r.invoiceNumber || '',
       'التاريخ': r.date || '',
       'الإجمالي قبل الضريبة': Math.round(r.subtotal*100)/100,
       'نسبة الضريبة %': r.vatRate,
@@ -1740,6 +1750,7 @@ els.exportSettlementBtn.addEventListener('click', ()=>{
       'الإجمالي شامل الضريبة': Math.round(r.total*100)/100
     }));
     sheetRows.push({
+      'رقم الفاتورة': '',
       'التاريخ': 'الإجمالي الكلي',
       'الإجمالي قبل الضريبة': Math.round(grandSubtotal*100)/100,
       'نسبة الضريبة %': '',
@@ -1765,7 +1776,7 @@ function renderHistory(){
     return `<div class="invoice-item">
       <div>
         <div class="store">${escapeHtml(inv.store || 'بدون اسم مورد')}</div>
-        <div class="sub">${escapeHtml(inv.date || 'بدون تاريخ')} · ${itemCount} صنف</div>
+        <div class="sub">${inv.invoiceNumber ? `فاتورة رقم ${escapeHtml(inv.invoiceNumber)} · ` : ''}${escapeHtml(inv.date || 'بدون تاريخ')} · ${itemCount} صنف</div>
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
         <div class="mono">${fmtPrice(total)} ${escapeHtml(settings.currency)}</div>
@@ -2031,6 +2042,7 @@ function appendDraftCard(data, label){
         <div class="nameSuggestion"></div>
       </div>
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" class="dateField" value="${escapeHtml(data.date||'')}"></div>
+      <div class="field" style="max-width:130px;"><label>رقم الفاتورة</label><input type="text" class="invoiceNumberField" value="${escapeHtml(data.invoiceNumber||'')}" placeholder="مثال: 7410"></div>
       <div class="field" style="max-width:110px;"><label>نسبة الضريبة %</label><input type="text" class="vatRateField num" value="${initialVat}"></div>
     </div>
     <table class="items">
@@ -2087,6 +2099,7 @@ function openEditInvoice(id){
   els.editStoreField.value = inv.store || '';
   els.editDateField.value = inv.date || '';
   els.editVatRateField.value = (inv.vatRate === undefined || inv.vatRate === null) ? 5 : inv.vatRate;
+  els.editInvoiceNumberField.value = inv.invoiceNumber || '';
   els.editItemsBody.innerHTML = (inv.items && inv.items.length ? inv.items : [{name:'',barcode:'',price:'',qty:1,unit:''}])
     .map(itemRowHtml).join('');
   els.editInvoiceStatus.innerHTML = '';
@@ -2105,6 +2118,7 @@ els.editItemsBody.addEventListener('click', (e)=>{
 els.saveEditInvoiceBtn.addEventListener('click', async ()=>{
   const store = els.editStoreField.value.trim();
   const date = els.editDateField.value || '';
+  const invoiceNumber = els.editInvoiceNumberField.value.trim();
   const vatRate = parseFloat(els.editVatRateField.value);
   const finalVat = isNaN(vatRate) ? 5 : vatRate;
   const rows = [...els.editItemsBody.querySelectorAll('tr')];
@@ -2123,9 +2137,9 @@ els.saveEditInvoiceBtn.addEventListener('click', async ()=>{
   els.saveEditInvoiceBtn.disabled = true;
   els.editInvoiceStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الحفظ...</div>`;
   try{
-    await updateInvoiceRemote(editingInvoiceId, store, date, items, finalVat);
+    await updateInvoiceRemote(editingInvoiceId, store, date, items, finalVat, invoiceNumber);
     const inv = invoices.find(i => String(i.id) === String(editingInvoiceId));
-    if(inv){ inv.store = store; inv.date = date; inv.vatRate = finalVat; inv.items = items; }
+    if(inv){ inv.store = store; inv.date = date; inv.vatRate = finalVat; inv.invoiceNumber = invoiceNumber; inv.items = items; }
     els.editInvoiceOverlay.classList.remove('show');
     renderAll();
   }catch(e){
@@ -2145,6 +2159,7 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
   for(const card of cards){
     const store = card.querySelector('.storeField').value.trim();
     const date = card.querySelector('.dateField').value || '';
+    const invoiceNumber = card.querySelector('.invoiceNumberField').value.trim();
     const vatRate = parseFloat(card.querySelector('.vatRateField').value);
     const rows = [...card.querySelectorAll('.itemsBody tr')];
     const items = rows.map(r=>{
@@ -2157,8 +2172,8 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
     }).filter(it => it.name && !isNaN(it.price));
     if(items.length === 0){ skippedCount++; continue; }
     try{
-      const newId = await insertInvoiceRemote(store, date, items, vatRate);
-      invoices.push({ id: newId, store, date, vatRate: isNaN(vatRate)?5:vatRate, items });
+      const newId = await insertInvoiceRemote(store, date, items, vatRate, invoiceNumber);
+      invoices.push({ id: newId, store, date, vatRate: isNaN(vatRate)?5:vatRate, invoiceNumber, items });
       savedCount++;
     }catch(e){
       console.error(e);
@@ -2564,6 +2579,7 @@ async function extractInvoiceData(base64Images){
   return {
     store: data.store || '',
     date: data.date || new Date().toISOString().slice(0,10),
+    invoiceNumber: data.invoiceNumber ? String(data.invoiceNumber).trim() : '',
     items: (data.items||[]).map(it=>({
       name: it.name || '',
       barcode: it.barcode ? String(it.barcode).trim() : '',
