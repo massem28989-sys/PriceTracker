@@ -274,7 +274,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       <option value="">كل الجهات</option>
     </select>
     <button class="btn btn-ghost owner-only" id="mergeSuppliersBtn" style="font-size:12px;">دمج موردين متكررين</button>
-    <button class="btn btn-ghost owner-only" id="supplierDestBtn" style="font-size:12px;">تصنيف الموردين بالجهة</button>
+    <button class="btn btn-ghost owner-only" id="supplierDestBtn" style="font-size:12px;">إعدادات الموردين</button>
     <div style="display:flex;align-items:center;gap:6px;">
       <label for="currencyInput" style="font-size:12px;color:var(--ink-soft);">العملة</label>
       <input type="text" class="currency-input" id="currencyInput" maxlength="6" value="ج.م">
@@ -286,6 +286,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   <div style="display:flex;gap:8px;margin-bottom:6px;">
     <button class="btn btn-ghost tab-btn active" id="tabProductsBtn">المنتجات</button>
     <button class="btn btn-ghost tab-btn" id="tabReportsBtn">التقارير الشهرية</button>
+    <button class="btn btn-ghost tab-btn" id="tabSettlementBtn">تسوية الموردين</button>
   </div>
 
   <div id="productsView">
@@ -328,6 +329,18 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     <div id="categoryBreakdown"></div>
     <div class="section-title"><span>الصرف حسب الجهة</span></div>
     <div id="destinationBreakdown"></div>
+  </div>
+
+  <div id="settlementView" style="display:none;">
+    <div class="section-title">
+      <span>تسوية الموردين</span>
+      <button class="btn btn-ghost" id="exportSettlementBtn" style="padding:6px 14px;font-size:12px;">تصدير كل الموردين Excel</button>
+    </div>
+    <p class="hint">الإجماليات هنا شاملة الضريبة (المبلغ الفعلي اللي بتدفعه للمورد) — مختلفة عن أسعار المتابعة في تبويب "المنتجات" اللي دايمًا قبل الضريبة عشان تفضل المقارنة صحيحة.</p>
+    <select id="settlementSupplierSelect" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:14px;background:var(--paper-raised);margin-bottom:14px;">
+      <option value="">اختار مورد</option>
+    </select>
+    <div id="settlementTable"></div>
   </div>
 </main>
 
@@ -437,13 +450,13 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   </div>
 </div>
 
-<!-- Supplier destinations modal -->
+<!-- Supplier settings modal (default destination + default VAT rate) -->
 <div class="overlay" id="supplierDestOverlay">
-  <div class="modal">
+  <div class="modal" style="max-width:600px;">
     <button class="modal-close" id="closeSupplierDestBtn">×</button>
-    <h2>تصنيف الموردين بالجهة</h2>
-    <p class="hint">حدد جهة افتراضية لكل مورد، وأي منتج تشتريه منه هياخد نفس الجهة تلقائيًا. لو منتج معيّن محتاج جهة مختلفة، تقدر تحدّدها له بنفسه من تفاصيله وهتتقدّم على جهة المورد.</p>
-    <div id="supplierDestList" style="max-height:400px;overflow-y:auto;"></div>
+    <h2>إعدادات الموردين</h2>
+    <p class="hint">حدد جهة ونسبة ضريبة افتراضية لكل مورد. أي فاتورة جديدة منه هتاخد نفس الإعدادات تلقائيًا (تقدر تغيّرها لفاتورة معيّنة وقت الإضافة). المنتج اللي محتاج جهة مختلفة، حدّدها من تفاصيله وهتتقدّم على جهة المورد.</p>
+    <div id="supplierDestList" style="max-height:420px;overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -496,6 +509,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     <div class="field-row">
       <div class="field"><label>اسم المورد/المتجر</label><input type="text" id="editStoreField"></div>
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" id="editDateField"></div>
+      <div class="field" style="max-width:110px;"><label>نسبة الضريبة %</label><input type="text" id="editVatRateField" class="num"></div>
     </div>
     <table class="items">
       <thead><tr><th style="width:30%;">المنتج</th><th style="width:16%;">الباركود</th><th style="width:14%;">السعر</th><th style="width:12%;">الكمية</th><th style="width:16%;">الوحدة</th><th></th></tr></thead>
@@ -645,6 +659,11 @@ const els = {
   supplierBreakdown: document.getElementById('supplierBreakdown'),
   supplierSearchInput: document.getElementById('supplierSearchInput'),
   destinationBreakdown: document.getElementById('destinationBreakdown'),
+  settlementView: document.getElementById('settlementView'),
+  tabSettlementBtn: document.getElementById('tabSettlementBtn'),
+  exportSettlementBtn: document.getElementById('exportSettlementBtn'),
+  settlementSupplierSelect: document.getElementById('settlementSupplierSelect'),
+  settlementTable: document.getElementById('settlementTable'),
   exportReportsBtn: document.getElementById('exportReportsBtn'),
   detailCategoryInput: document.getElementById('detailCategoryInput'),
   saveDetailCategoryBtn: document.getElementById('saveDetailCategoryBtn'),
@@ -657,6 +676,7 @@ const els = {
   closeEditInvoiceBtn: document.getElementById('closeEditInvoiceBtn'),
   editStoreField: document.getElementById('editStoreField'),
   editDateField: document.getElementById('editDateField'),
+  editVatRateField: document.getElementById('editVatRateField'),
   editItemsBody: document.getElementById('editItemsBody'),
   editAddRowBtn: document.getElementById('editAddRowBtn'),
   saveEditInvoiceBtn: document.getElementById('saveEditInvoiceBtn'),
@@ -715,6 +735,7 @@ let currentWorkspace = null; // one of the above
 let categoriesMap = new Map(); // product name -> category
 let destinationsMap = new Map(); // product name -> destination/department (explicit override)
 let supplierDestinationsMap = new Map(); // supplier name -> default destination/department
+let supplierVatRatesMap = new Map(); // supplier name -> default VAT rate %
 let unitConversionsMap = new Map(); // baseProductKey ('nm:...') -> Map(unit -> factor)
 let selectedProductKeys = new Set();
 let lastProductMap = new Map();
@@ -959,18 +980,29 @@ async function saveDestinationBulk(keys, destination){
 
 async function loadSupplierDestinations(){
   supplierDestinationsMap = new Map();
+  supplierVatRatesMap = new Map();
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('supplier_destinations').select('supplier_name, destination').eq('workspace_id', currentWorkspace.id);
-  if(!error) (data||[]).forEach(r => supplierDestinationsMap.set(r.supplier_name, r.destination));
+  const { data, error } = await sb.from('supplier_destinations').select('supplier_name, destination, default_vat_rate').eq('workspace_id', currentWorkspace.id);
+  if(!error) (data||[]).forEach(r=>{
+    if(r.destination) supplierDestinationsMap.set(r.supplier_name, r.destination);
+    if(r.default_vat_rate !== null && r.default_vat_rate !== undefined) supplierVatRatesMap.set(r.supplier_name, Number(r.default_vat_rate));
+  });
 }
-async function saveSupplierDestination(supplierName, destination){
-  if(destination){
-    supplierDestinationsMap.set(supplierName, destination);
-    await sb.from('supplier_destinations').upsert({ workspace_id: currentWorkspace.id, supplier_name: supplierName, destination });
-  }else{
+async function saveSupplierSettings(supplierName, destination, vatRate){
+  const hasVat = vatRate !== null && vatRate !== undefined && !isNaN(vatRate);
+  if(!destination && !hasVat){
     supplierDestinationsMap.delete(supplierName);
+    supplierVatRatesMap.delete(supplierName);
     await sb.from('supplier_destinations').delete().eq('workspace_id', currentWorkspace.id).eq('supplier_name', supplierName);
+    return;
   }
+  if(destination) supplierDestinationsMap.set(supplierName, destination); else supplierDestinationsMap.delete(supplierName);
+  if(hasVat) supplierVatRatesMap.set(supplierName, vatRate); else supplierVatRatesMap.delete(supplierName);
+  await sb.from('supplier_destinations').upsert({
+    workspace_id: currentWorkspace.id, supplier_name: supplierName,
+    destination: destination || null,
+    default_vat_rate: hasVat ? vatRate : null
+  });
 }
 
 // الجهة الفعلية لمنتج: لو له جهة محددة بنفسه بتتقدّم، وإلا بيرث جهة آخر مورد اشتُري منه
@@ -994,7 +1026,7 @@ async function refreshInvoicesFromServer(){
   if(!currentWorkspace){ invoices = []; return; }
   const { data, error } = await sb
     .from('invoices')
-    .select('id, store, invoice_date, invoice_items(id, name, barcode, price, qty, unit)')
+    .select('id, store, invoice_date, vat_rate, invoice_items(id, name, barcode, price, qty, unit)')
     .eq('workspace_id', currentWorkspace.id)
     .order('invoice_date', { ascending: true });
   if(error){ console.error(error); invoices = []; return; }
@@ -1002,16 +1034,17 @@ async function refreshInvoicesFromServer(){
     id: r.id,
     store: r.store || '',
     date: r.invoice_date || '',
+    vatRate: (r.vat_rate === null || r.vat_rate === undefined) ? 5 : Number(r.vat_rate),
     items: (r.invoice_items || []).map(it => ({
       id: it.id, name: it.name, barcode: it.barcode || '', price: Number(it.price), qty: Number(it.qty) || 1, unit: it.unit || ''
     }))
   }));
 }
 
-async function insertInvoiceRemote(store, date, items){
+async function insertInvoiceRemote(store, date, items, vatRate){
   const { data: invRow, error: invErr } = await sb
     .from('invoices')
-    .insert({ workspace_id: currentWorkspace.id, user_id: currentUser.id, store: store || null, invoice_date: date || null })
+    .insert({ workspace_id: currentWorkspace.id, user_id: currentUser.id, store: store || null, invoice_date: date || null, vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate })
     .select()
     .single();
   if(invErr) throw invErr;
@@ -1027,8 +1060,11 @@ async function deleteInvoiceRemote(id){
   if(error) console.error(error);
 }
 
-async function updateInvoiceRemote(id, store, date, items){
-  const { error: e1 } = await sb.from('invoices').update({ store: store || null, invoice_date: date || null }).eq('id', id);
+async function updateInvoiceRemote(id, store, date, items, vatRate){
+  const { error: e1 } = await sb.from('invoices').update({
+    store: store || null, invoice_date: date || null,
+    vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate
+  }).eq('id', id);
   if(e1) throw e1;
   const { error: e2 } = await sb.from('invoice_items').delete().eq('invoice_id', id);
   if(e2) throw e2;
@@ -1421,9 +1457,10 @@ els.mergeSuppliersBtn.addEventListener('click', openSupplierMergeModal);
 function openSupplierDestModal(){
   const suppliers = [...new Set(invoices.map(inv => inv.store).filter(Boolean))].sort((a,b)=> a.localeCompare(b,'ar'));
   els.supplierDestList.innerHTML = suppliers.map(name => `
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line-soft);">
-      <span style="flex:1;">${escapeHtml(name)}</span>
-      <input type="text" class="supplierDestInput" list="existingDestinations" data-supplier="${escapeHtml(name)}" value="${escapeHtml(supplierDestinationsMap.get(name)||'')}" placeholder="بدون جهة" style="width:160px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap;">
+      <span style="flex:1;min-width:140px;">${escapeHtml(name)}</span>
+      <input type="text" class="supplierDestInput" list="existingDestinations" data-supplier="${escapeHtml(name)}" value="${escapeHtml(supplierDestinationsMap.get(name)||'')}" placeholder="بدون جهة" style="width:140px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;">
+      <input type="text" class="supplierVatInput num" data-supplier="${escapeHtml(name)}" value="${supplierVatRatesMap.has(name)?supplierVatRatesMap.get(name):''}" placeholder="ضريبة %" style="width:80px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;">
       <button class="btn btn-ghost saveSupplierDestBtn" data-supplier="${escapeHtml(name)}" style="padding:6px 12px;font-size:12px;">حفظ</button>
       <span class="supplierDestStatus" style="font-size:11px;color:var(--pine-deep);min-width:16px;"></span>
     </div>`).join('') || `<div class="empty-state">مفيش موردين مسجّلين لسه.</div>`;
@@ -1437,11 +1474,13 @@ els.supplierDestList.addEventListener('click', async (e)=>{
   if(!btn) return;
   const supplier = btn.dataset.supplier;
   const row = btn.closest('div');
-  const input = row.querySelector('.supplierDestInput');
+  const destInput = row.querySelector('.supplierDestInput');
+  const vatInput = row.querySelector('.supplierVatInput');
   const statusEl = row.querySelector('.supplierDestStatus');
+  const vatVal = vatInput.value.trim() === '' ? null : parseFloat(vatInput.value);
   btn.disabled = true;
   try{
-    await saveSupplierDestination(supplier, input.value.trim());
+    await saveSupplierSettings(supplier, destInput.value.trim(), vatVal);
     statusEl.textContent = '✓';
     setTimeout(()=>{ statusEl.textContent = ''; }, 2000);
     renderDashboard();
@@ -1590,15 +1629,126 @@ els.exportReportsBtn.addEventListener('click', ()=>{
 els.tabProductsBtn.addEventListener('click', ()=>{
   els.productsView.style.display = 'block';
   els.reportsView.style.display = 'none';
+  els.settlementView.style.display = 'none';
   els.tabProductsBtn.classList.add('active');
   els.tabReportsBtn.classList.remove('active');
+  els.tabSettlementBtn.classList.remove('active');
 });
 els.tabReportsBtn.addEventListener('click', ()=>{
   els.productsView.style.display = 'none';
   els.reportsView.style.display = 'block';
+  els.settlementView.style.display = 'none';
   els.tabReportsBtn.classList.add('active');
   els.tabProductsBtn.classList.remove('active');
+  els.tabSettlementBtn.classList.remove('active');
   renderReports();
+});
+els.tabSettlementBtn.addEventListener('click', ()=>{
+  els.productsView.style.display = 'none';
+  els.reportsView.style.display = 'none';
+  els.settlementView.style.display = 'block';
+  els.tabSettlementBtn.classList.add('active');
+  els.tabProductsBtn.classList.remove('active');
+  els.tabReportsBtn.classList.remove('active');
+  renderSettlement();
+});
+
+function computeSettlementRows(supplierName){
+  return invoices.filter(inv => inv.store === supplierName).map(inv => {
+    const subtotal = (inv.items||[]).reduce((s,it)=> s + (Number(it.price)||0), 0);
+    const vatRate = (inv.vatRate === undefined || inv.vatRate === null || isNaN(Number(inv.vatRate))) ? 5 : Number(inv.vatRate);
+    const vat = subtotal * vatRate / 100;
+    return { id: inv.id, date: inv.date || '', subtotal, vatRate, vat, total: subtotal + vat };
+  }).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+}
+
+function populateSettlementSupplierSelect(){
+  const suppliers = [...new Set(invoices.map(inv => inv.store).filter(Boolean))].sort((a,b)=> a.localeCompare(b,'ar'));
+  const current = els.settlementSupplierSelect.value;
+  els.settlementSupplierSelect.innerHTML = `<option value="">اختار مورد</option>` +
+    suppliers.map(s=> `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  if(suppliers.includes(current)) els.settlementSupplierSelect.value = current;
+}
+
+function renderSettlement(){
+  populateSettlementSupplierSelect();
+  const supplier = els.settlementSupplierSelect.value;
+  if(!supplier){
+    els.settlementTable.innerHTML = `<div class="empty-state">اختار مورد من القايمة فوق عشان تشوف تسويته.</div>`;
+    return;
+  }
+  const rows = computeSettlementRows(supplier);
+  if(rows.length === 0){
+    els.settlementTable.innerHTML = `<div class="empty-state">مفيش فواتير لهذا المورد.</div>`;
+    return;
+  }
+  const grandSubtotal = rows.reduce((s,r)=> s+r.subtotal, 0);
+  const grandVat = rows.reduce((s,r)=> s+r.vat, 0);
+  const grandTotal = rows.reduce((s,r)=> s+r.total, 0);
+  els.settlementTable.innerHTML = `
+    <table class="items">
+      <thead><tr>
+        <th>التاريخ</th><th>الإجمالي قبل الضريبة</th><th>نسبة الضريبة</th><th>الضريبة</th><th>الإجمالي شامل الضريبة</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r=> `<tr>
+          <td style="padding:8px 4px;">${escapeHtml(r.date||'—')}</td>
+          <td class="mono" style="padding:8px 4px;">${fmtPrice(r.subtotal)}</td>
+          <td class="mono" style="padding:8px 4px;">${fmtPrice(r.vatRate)}%</td>
+          <td class="mono" style="padding:8px 4px;">${fmtPrice(r.vat)}</td>
+          <td class="mono" style="padding:8px 4px;">${fmtPrice(r.total)}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;border-top:2px solid var(--ink);">
+          <td style="padding:10px 4px;">الإجمالي الكلي</td>
+          <td class="mono" style="padding:10px 4px;">${fmtPrice(grandSubtotal)}</td>
+          <td></td>
+          <td class="mono" style="padding:10px 4px;">${fmtPrice(grandVat)}</td>
+          <td class="mono" style="padding:10px 4px;">${fmtPrice(grandTotal)} ${escapeHtml(settings.currency)}</td>
+        </tr>
+      </tfoot>
+    </table>`;
+}
+els.settlementSupplierSelect.addEventListener('change', renderSettlement);
+
+function sanitizeSheetName(name, usedNames){
+  let clean = (name || 'مورد').replace(/[:\\\/?*\[\]]/g, ' ').trim().substring(0,31) || 'مورد';
+  let final = clean, i = 2;
+  while(usedNames.has(final)){
+    final = (clean.substring(0,28) + ' ' + i).substring(0,31);
+    i++;
+  }
+  usedNames.add(final);
+  return final;
+}
+els.exportSettlementBtn.addEventListener('click', ()=>{
+  const suppliers = [...new Set(invoices.map(inv => inv.store).filter(Boolean))].sort((a,b)=> a.localeCompare(b,'ar'));
+  if(suppliers.length === 0){ alert('مفيش موردين لتصديرهم.'); return; }
+  const wb = XLSX.utils.book_new();
+  const usedNames = new Set();
+  suppliers.forEach(supplier=>{
+    const rows = computeSettlementRows(supplier);
+    const grandSubtotal = rows.reduce((s,r)=> s+r.subtotal, 0);
+    const grandVat = rows.reduce((s,r)=> s+r.vat, 0);
+    const grandTotal = rows.reduce((s,r)=> s+r.total, 0);
+    const sheetRows = rows.map(r=> ({
+      'التاريخ': r.date || '',
+      'الإجمالي قبل الضريبة': Math.round(r.subtotal*100)/100,
+      'نسبة الضريبة %': r.vatRate,
+      'الضريبة': Math.round(r.vat*100)/100,
+      'الإجمالي شامل الضريبة': Math.round(r.total*100)/100
+    }));
+    sheetRows.push({
+      'التاريخ': 'الإجمالي الكلي',
+      'الإجمالي قبل الضريبة': Math.round(grandSubtotal*100)/100,
+      'نسبة الضريبة %': '',
+      'الضريبة': Math.round(grandVat*100)/100,
+      'الإجمالي شامل الضريبة': Math.round(grandTotal*100)/100
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), sanitizeSheetName(supplier, usedNames));
+  });
+  XLSX.writeFile(wb, 'تسوية-الموردين.xlsx');
 });
 
 function renderHistory(){
@@ -1866,6 +2016,9 @@ function appendDraftCard(data, label){
   const id = draftIdCounter++;
   const rowsHtml = (data.items && data.items.length ? data.items : [{name:'',barcode:'',price:'',qty:1,unit:''}])
     .map(itemRowHtml).join('');
+  const initialVat = (data.vatRate !== undefined && data.vatRate !== null)
+    ? data.vatRate
+    : (supplierVatRatesMap.has(data.store) ? supplierVatRatesMap.get(data.store) : 5);
   const html = `<div class="draft-card" data-draftid="${id}">
     <div class="draft-card-head">
       <div class="draft-card-title">${escapeHtml(label)}</div>
@@ -1878,6 +2031,7 @@ function appendDraftCard(data, label){
         <div class="nameSuggestion"></div>
       </div>
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" class="dateField" value="${escapeHtml(data.date||'')}"></div>
+      <div class="field" style="max-width:110px;"><label>نسبة الضريبة %</label><input type="text" class="vatRateField num" value="${initialVat}"></div>
     </div>
     <table class="items">
       <thead><tr><th style="width:30%;">المنتج</th><th style="width:16%;">الباركود</th><th style="width:14%;">السعر</th><th style="width:12%;">الكمية</th><th style="width:16%;">الوحدة</th><th></th></tr></thead>
@@ -1915,7 +2069,14 @@ els.draftsContainer.addEventListener('click', (e)=>{
 });
 els.draftsContainer.addEventListener('focusout', (e)=>{
   if(e.target.classList && e.target.classList.contains('nameInput')) checkNameSuggestion(e.target);
-  if(e.target.classList && e.target.classList.contains('storeField')) checkStoreSuggestion(e.target);
+  if(e.target.classList && e.target.classList.contains('storeField')){
+    checkStoreSuggestion(e.target);
+    if(supplierVatRatesMap.has(e.target.value.trim())){
+      const card = e.target.closest('.draft-card');
+      const vatInput = card && card.querySelector('.vatRateField');
+      if(vatInput) vatInput.value = supplierVatRatesMap.get(e.target.value.trim());
+    }
+  }
 });
 
 // ---------- edit a saved invoice ----------
@@ -1925,6 +2086,7 @@ function openEditInvoice(id){
   editingInvoiceId = inv.id;
   els.editStoreField.value = inv.store || '';
   els.editDateField.value = inv.date || '';
+  els.editVatRateField.value = (inv.vatRate === undefined || inv.vatRate === null) ? 5 : inv.vatRate;
   els.editItemsBody.innerHTML = (inv.items && inv.items.length ? inv.items : [{name:'',barcode:'',price:'',qty:1,unit:''}])
     .map(itemRowHtml).join('');
   els.editInvoiceStatus.innerHTML = '';
@@ -1943,6 +2105,8 @@ els.editItemsBody.addEventListener('click', (e)=>{
 els.saveEditInvoiceBtn.addEventListener('click', async ()=>{
   const store = els.editStoreField.value.trim();
   const date = els.editDateField.value || '';
+  const vatRate = parseFloat(els.editVatRateField.value);
+  const finalVat = isNaN(vatRate) ? 5 : vatRate;
   const rows = [...els.editItemsBody.querySelectorAll('tr')];
   const items = rows.map(r=>{
     const name = r.querySelector('.nameInput').value.trim();
@@ -1959,9 +2123,9 @@ els.saveEditInvoiceBtn.addEventListener('click', async ()=>{
   els.saveEditInvoiceBtn.disabled = true;
   els.editInvoiceStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الحفظ...</div>`;
   try{
-    await updateInvoiceRemote(editingInvoiceId, store, date, items);
+    await updateInvoiceRemote(editingInvoiceId, store, date, items, finalVat);
     const inv = invoices.find(i => String(i.id) === String(editingInvoiceId));
-    if(inv){ inv.store = store; inv.date = date; inv.items = items; }
+    if(inv){ inv.store = store; inv.date = date; inv.vatRate = finalVat; inv.items = items; }
     els.editInvoiceOverlay.classList.remove('show');
     renderAll();
   }catch(e){
@@ -1981,6 +2145,7 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
   for(const card of cards){
     const store = card.querySelector('.storeField').value.trim();
     const date = card.querySelector('.dateField').value || '';
+    const vatRate = parseFloat(card.querySelector('.vatRateField').value);
     const rows = [...card.querySelectorAll('.itemsBody tr')];
     const items = rows.map(r=>{
       const name = r.querySelector('.nameInput').value.trim();
@@ -1992,8 +2157,8 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
     }).filter(it => it.name && !isNaN(it.price));
     if(items.length === 0){ skippedCount++; continue; }
     try{
-      const newId = await insertInvoiceRemote(store, date, items);
-      invoices.push({ id: newId, store, date, items });
+      const newId = await insertInvoiceRemote(store, date, items, vatRate);
+      invoices.push({ id: newId, store, date, vatRate: isNaN(vatRate)?5:vatRate, items });
       savedCount++;
     }catch(e){
       console.error(e);
@@ -2064,9 +2229,11 @@ els.doImportBtn.addEventListener('click', async ()=>{
     if(items.length === 0){ skipped++; continue; }
     const store = (inv.store||'').toString().trim();
     const date = (inv.date||'').toString().trim();
+    const vatRate = (typeof inv.vatRate === 'number' ? inv.vatRate : parseFloat(inv.vatRate));
+    const finalVat = isNaN(vatRate) ? 5 : vatRate;
     try{
-      const newId = await insertInvoiceRemote(store, date, items);
-      invoices.push({ id: newId, store, date, items });
+      const newId = await insertInvoiceRemote(store, date, items, finalVat);
+      invoices.push({ id: newId, store, date, vatRate: finalVat, items });
       addedInvoices++;
       addedItems += items.length;
     }catch(e){
