@@ -341,6 +341,17 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       <option value="">اختار مورد</option>
     </select>
     <div id="settlementTable"></div>
+
+    <div class="section-title owner-only"><span>مطابقة كشف حساب المورد</span></div>
+    <div class="owner-only">
+      <p class="hint">ارفع كشف حساب (Statement / Customer Outstanding) من المورد المختار فوق، والأداة هتقارنه تلقائيًا ببياناتك وتوريك أي فرق.</p>
+      <div class="dropzone" id="statementDropzone">
+        <div>اضغط لاختيار كشف الحساب (PDF أو صورة)</div>
+        <input type="file" id="statementFileInput" accept="image/*,application/pdf">
+      </div>
+      <div id="statementStatus"></div>
+    </div>
+    <div id="statementCompareResult"></div>
   </div>
 </main>
 
@@ -665,6 +676,10 @@ const els = {
   exportSettlementBtn: document.getElementById('exportSettlementBtn'),
   settlementSupplierSelect: document.getElementById('settlementSupplierSelect'),
   settlementTable: document.getElementById('settlementTable'),
+  statementDropzone: document.getElementById('statementDropzone'),
+  statementFileInput: document.getElementById('statementFileInput'),
+  statementStatus: document.getElementById('statementStatus'),
+  statementCompareResult: document.getElementById('statementCompareResult'),
   exportReportsBtn: document.getElementById('exportReportsBtn'),
   detailCategoryInput: document.getElementById('detailCategoryInput'),
   saveDetailCategoryBtn: document.getElementById('saveDetailCategoryBtn'),
@@ -1719,7 +1734,11 @@ function renderSettlement(){
       </tfoot>
     </table>`;
 }
-els.settlementSupplierSelect.addEventListener('change', renderSettlement);
+els.settlementSupplierSelect.addEventListener('change', ()=>{
+  els.statementCompareResult.innerHTML = '';
+  els.statementStatus.innerHTML = '';
+  renderSettlement();
+});
 
 function sanitizeSheetName(name, usedNames){
   let clean = (name || 'مورد').replace(/[:\\\/?*\[\]]/g, ' ').trim().substring(0,31) || 'مورد';
@@ -1760,6 +1779,137 @@ els.exportSettlementBtn.addEventListener('click', ()=>{
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), sanitizeSheetName(supplier, usedNames));
   });
   XLSX.writeFile(wb, 'تسوية-الموردين.xlsx');
+});
+
+// ---------- statement upload & auto-match ----------
+async function extractStatementData(images){
+  const timeoutMs = 60000;
+  let result;
+  try{
+    result = await Promise.race([
+      sb.functions.invoke('extract-invoice', { body: { images, mode: 'statement' } }),
+      new Promise((_, reject) => setTimeout(()=> reject(new Error('TIMEOUT')), timeoutMs))
+    ]);
+  }catch(e){
+    if(e && e.message === 'TIMEOUT') throw new Error('انتهت مهلة الاتصال (الطلب استغرق أكتر من دقيقة)');
+    throw new Error('فشل الاتصال بالخادم: ' + (e && e.message ? e.message : String(e)));
+  }
+  const { data, error } = result;
+  if(error){
+    let msg = error.message || 'خطأ غير معروف';
+    try{
+      if(error.context && typeof error.context.json === 'function'){
+        const body = await error.context.json();
+        if(body && body.error) msg = body.error;
+      }
+    }catch(_){ /* ignore */ }
+    throw new Error('خطأ من الخادم: ' + msg);
+  }
+  if(!data || data.error){
+    throw new Error(data && data.error ? data.error : 'رد غير متوقع من الخادم');
+  }
+  return {
+    supplier: data.supplier || '',
+    asOfDate: data.asOfDate || '',
+    items: (data.items||[]).map(it=>({
+      invoiceNumber: it.invoiceNumber ? String(it.invoiceNumber).trim() : '',
+      date: it.date || '',
+      total: typeof it.total === 'number' ? it.total : (parseFloat(it.total) || 0)
+    }))
+  };
+}
+
+function compareStatementToRecords(statementItems, supplierName){
+  const ourRows = computeSettlementRows(supplierName);
+  const ourByNumber = new Map();
+  const ourByDate = new Map();
+  ourRows.forEach(r=>{
+    if(r.invoiceNumber) ourByNumber.set(normName(r.invoiceNumber).toUpperCase(), r);
+    if(r.date){
+      if(!ourByDate.has(r.date)) ourByDate.set(r.date, []);
+      ourByDate.get(r.date).push(r);
+    }
+  });
+
+  const matchedOurIds = new Set();
+  const results = statementItems.map(stmt=>{
+    let ourMatch = null;
+    const numKey = stmt.invoiceNumber ? normName(stmt.invoiceNumber).toUpperCase() : '';
+    if(numKey && ourByNumber.has(numKey)){
+      ourMatch = ourByNumber.get(numKey);
+    }else if(stmt.date && ourByDate.has(stmt.date)){
+      const candidates = ourByDate.get(stmt.date).filter(r=> !matchedOurIds.has(r.id));
+      if(candidates.length === 1) ourMatch = candidates[0];
+    }
+    if(ourMatch) matchedOurIds.add(ourMatch.id);
+    const diff = ourMatch ? (ourMatch.total - stmt.total) : null;
+    let status;
+    if(!ourMatch) status = 'missing_in_app';
+    else if(Math.abs(diff) < 0.5) status = 'match';
+    else status = 'mismatch';
+    return { invoiceNumber: stmt.invoiceNumber, date: stmt.date, total: stmt.total, ourTotal: ourMatch ? ourMatch.total : null, diff, status };
+  });
+
+  const extraOurRows = ourRows.filter(r => !matchedOurIds.has(r.id)).map(r=> ({
+    invoiceNumber: r.invoiceNumber, date: r.date, total: null, ourTotal: r.total, diff: null, status: 'missing_in_statement'
+  }));
+
+  return [...results, ...extraOurRows].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+}
+
+function renderStatementComparison(rows){
+  if(rows.length === 0){ els.statementCompareResult.innerHTML = ''; return; }
+  const statusLabel = {
+    match: '<span style="color:var(--pine-deep);font-weight:600;">✓ مطابق</span>',
+    mismatch: '<span style="color:var(--brick);font-weight:600;">⚠ فرق</span>',
+    missing_in_app: '<span style="color:var(--brick);font-weight:600;">✗ مش موجودة عندنا</span>',
+    missing_in_statement: '<span style="color:var(--steel);font-weight:600;">✗ مش في كشف المورد</span>'
+  };
+  els.statementCompareResult.innerHTML = `
+    <table class="items">
+      <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>إجمالي الكشف</th><th>إجمالي عندنا</th><th>الفرق</th><th>الحالة</th></tr></thead>
+      <tbody>
+        ${rows.map(r=> `<tr>
+          <td class="mono" style="padding:8px 4px;">${escapeHtml(r.invoiceNumber||'—')}</td>
+          <td style="padding:8px 4px;">${escapeHtml(r.date||'—')}</td>
+          <td class="mono" style="padding:8px 4px;">${(r.total!==null&&r.total!==undefined)?fmtPrice(r.total):'—'}</td>
+          <td class="mono" style="padding:8px 4px;">${(r.ourTotal!==null&&r.ourTotal!==undefined)?fmtPrice(r.ourTotal):'—'}</td>
+          <td class="mono" style="padding:8px 4px;">${(r.diff!==null&&r.diff!==undefined&&Math.abs(r.diff)>=0.5)?fmtPrice(r.diff):'—'}</td>
+          <td style="padding:8px 4px;">${statusLabel[r.status]}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+els.statementDropzone.addEventListener('click', ()=> els.statementFileInput.click());
+els.statementFileInput.addEventListener('change', async ()=>{
+  const file = els.statementFileInput.files[0];
+  if(!file) return;
+  const supplier = els.settlementSupplierSelect.value;
+  if(!supplier){
+    els.statementStatus.innerHTML = `<div class="error-box">اختار مورد الأول من القايمة فوق.</div>`;
+    els.statementFileInput.value = '';
+    return;
+  }
+  els.statementStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري قراءة الكشف...</div>`;
+  els.statementCompareResult.innerHTML = '';
+  try{
+    let images;
+    if(file.type === 'application/pdf') images = await pdfToImages(file);
+    else images = [await fileToBase64(file)];
+    els.statementStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري التحليل والمطابقة...</div>`;
+    const extracted = await extractStatementData(images);
+    const compared = compareStatementToRecords(extracted.items, supplier);
+    renderStatementComparison(compared);
+    const issues = compared.filter(r=> r.status !== 'match').length;
+    els.statementStatus.innerHTML = issues === 0
+      ? `<div class="status-line" style="color:var(--pine-deep);">✓ كل حاجة متطابقة (${compared.length} فاتورة)</div>`
+      : `<div class="status-line" style="color:var(--brick);">⚠ فيه ${issues} فاتورة محتاجة مراجعة من أصل ${compared.length}</div>`;
+  }catch(e){
+    console.error(e);
+    els.statementStatus.innerHTML = `<div class="error-box">فشل التحليل: ${escapeHtml(e.message || String(e))}</div>`;
+  }
+  els.statementFileInput.value = '';
 });
 
 function renderHistory(){
