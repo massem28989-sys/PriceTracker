@@ -533,6 +533,14 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" id="editDateField"></div>
       <div class="field" style="max-width:130px;"><label>رقم الفاتورة</label><input type="text" id="editInvoiceNumberField"></div>
       <div class="field" style="max-width:110px;"><label>نسبة الضريبة %</label><input type="text" id="editVatRateField" class="num"></div>
+      <div class="field" style="max-width:110px;">
+        <label>نوع الدفع</label>
+        <select id="editPaymentTypeField">
+          <option value="">غير محدد</option>
+          <option value="cash">كاش</option>
+          <option value="credit">كريديت</option>
+        </select>
+      </div>
     </div>
     <table class="items">
       <thead><tr><th style="width:30%;">المنتج</th><th style="width:16%;">الباركود</th><th style="width:14%;">السعر</th><th style="width:12%;">الكمية</th><th style="width:16%;">الوحدة</th><th></th></tr></thead>
@@ -708,6 +716,7 @@ const els = {
   editDateField: document.getElementById('editDateField'),
   editVatRateField: document.getElementById('editVatRateField'),
   editInvoiceNumberField: document.getElementById('editInvoiceNumberField'),
+  editPaymentTypeField: document.getElementById('editPaymentTypeField'),
   editItemsBody: document.getElementById('editItemsBody'),
   editAddRowBtn: document.getElementById('editAddRowBtn'),
   saveEditInvoiceBtn: document.getElementById('saveEditInvoiceBtn'),
@@ -767,6 +776,7 @@ let categoriesMap = new Map(); // product name -> category
 let destinationsMap = new Map(); // product name -> destination/department (explicit override)
 let supplierDestinationsMap = new Map(); // supplier name -> default destination/department
 let supplierVatRatesMap = new Map(); // supplier name -> default VAT rate %
+let supplierPaymentMap = new Map(); // supplier name -> { type: 'cash'|'credit', creditDays: number }
 let unitConversionsMap = new Map(); // baseProductKey ('nm:...') -> Map(unit -> factor)
 let selectedProductKeys = new Set();
 let lastProductMap = new Map();
@@ -1012,27 +1022,39 @@ async function saveDestinationBulk(keys, destination){
 async function loadSupplierDestinations(){
   supplierDestinationsMap = new Map();
   supplierVatRatesMap = new Map();
+  supplierPaymentMap = new Map();
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('supplier_destinations').select('supplier_name, destination, default_vat_rate').eq('workspace_id', currentWorkspace.id);
+  const { data, error } = await sb.from('supplier_destinations').select('supplier_name, destination, default_vat_rate, payment_type, credit_days').eq('workspace_id', currentWorkspace.id);
   if(!error) (data||[]).forEach(r=>{
     if(r.destination) supplierDestinationsMap.set(r.supplier_name, r.destination);
     if(r.default_vat_rate !== null && r.default_vat_rate !== undefined) supplierVatRatesMap.set(r.supplier_name, Number(r.default_vat_rate));
+    if(r.payment_type) supplierPaymentMap.set(r.supplier_name, {
+      type: r.payment_type,
+      creditDays: (r.credit_days !== null && r.credit_days !== undefined) ? Number(r.credit_days) : null
+    });
   });
 }
-async function saveSupplierSettings(supplierName, destination, vatRate){
+async function saveSupplierSettings(supplierName, destination, vatRate, paymentType, creditDays){
   const hasVat = vatRate !== null && vatRate !== undefined && !isNaN(vatRate);
-  if(!destination && !hasVat){
+  const hasPayment = paymentType === 'cash' || paymentType === 'credit';
+  const hasCreditDays = creditDays !== null && creditDays !== undefined && !isNaN(creditDays);
+  if(!destination && !hasVat && !hasPayment){
     supplierDestinationsMap.delete(supplierName);
     supplierVatRatesMap.delete(supplierName);
+    supplierPaymentMap.delete(supplierName);
     await sb.from('supplier_destinations').delete().eq('workspace_id', currentWorkspace.id).eq('supplier_name', supplierName);
     return;
   }
   if(destination) supplierDestinationsMap.set(supplierName, destination); else supplierDestinationsMap.delete(supplierName);
   if(hasVat) supplierVatRatesMap.set(supplierName, vatRate); else supplierVatRatesMap.delete(supplierName);
+  if(hasPayment) supplierPaymentMap.set(supplierName, { type: paymentType, creditDays: (paymentType==='credit' && hasCreditDays) ? creditDays : null });
+  else supplierPaymentMap.delete(supplierName);
   await sb.from('supplier_destinations').upsert({
     workspace_id: currentWorkspace.id, supplier_name: supplierName,
     destination: destination || null,
-    default_vat_rate: hasVat ? vatRate : null
+    default_vat_rate: hasVat ? vatRate : null,
+    payment_type: hasPayment ? paymentType : null,
+    credit_days: (hasPayment && paymentType==='credit' && hasCreditDays) ? creditDays : null
   });
 }
 
@@ -1057,7 +1079,7 @@ async function refreshInvoicesFromServer(){
   if(!currentWorkspace){ invoices = []; return; }
   const { data, error } = await sb
     .from('invoices')
-    .select('id, store, invoice_date, vat_rate, invoice_number, invoice_items(id, name, barcode, price, qty, unit)')
+    .select('id, store, invoice_date, vat_rate, invoice_number, payment_type, invoice_items(id, name, barcode, price, qty, unit)')
     .eq('workspace_id', currentWorkspace.id)
     .order('invoice_date', { ascending: true });
   if(error){ console.error(error); invoices = []; return; }
@@ -1067,19 +1089,21 @@ async function refreshInvoicesFromServer(){
     date: r.invoice_date || '',
     vatRate: (r.vat_rate === null || r.vat_rate === undefined) ? 5 : Number(r.vat_rate),
     invoiceNumber: r.invoice_number || '',
+    paymentType: r.payment_type || '',
     items: (r.invoice_items || []).map(it => ({
       id: it.id, name: it.name, barcode: it.barcode || '', price: Number(it.price), qty: Number(it.qty) || 1, unit: it.unit || ''
     }))
   }));
 }
 
-async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber){
+async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, paymentType){
   const { data: invRow, error: invErr } = await sb
     .from('invoices')
     .insert({
       workspace_id: currentWorkspace.id, user_id: currentUser.id, store: store || null, invoice_date: date || null,
       vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate,
-      invoice_number: invoiceNumber || null
+      invoice_number: invoiceNumber || null,
+      payment_type: (paymentType === 'cash' || paymentType === 'credit') ? paymentType : null
     })
     .select()
     .single();
@@ -1096,11 +1120,12 @@ async function deleteInvoiceRemote(id){
   if(error) console.error(error);
 }
 
-async function updateInvoiceRemote(id, store, date, items, vatRate, invoiceNumber){
+async function updateInvoiceRemote(id, store, date, items, vatRate, invoiceNumber, paymentType){
   const { error: e1 } = await sb.from('invoices').update({
     store: store || null, invoice_date: date || null,
     vat_rate: (vatRate===undefined||vatRate===null||isNaN(vatRate)) ? 5 : vatRate,
-    invoice_number: invoiceNumber || null
+    invoice_number: invoiceNumber || null,
+    payment_type: (paymentType === 'cash' || paymentType === 'credit') ? paymentType : null
   }).eq('id', id);
   if(e1) throw e1;
   const { error: e2 } = await sb.from('invoice_items').delete().eq('invoice_id', id);
@@ -1493,31 +1518,52 @@ els.mergeSuppliersBtn.addEventListener('click', openSupplierMergeModal);
 // ---------- classify suppliers by default destination ----------
 function openSupplierDestModal(){
   const suppliers = [...new Set(invoices.map(inv => inv.store).filter(Boolean))].sort((a,b)=> a.localeCompare(b,'ar'));
-  els.supplierDestList.innerHTML = suppliers.map(name => `
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap;">
-      <span style="flex:1;min-width:140px;">${escapeHtml(name)}</span>
-      <input type="text" class="supplierDestInput" list="existingDestinations" data-supplier="${escapeHtml(name)}" value="${escapeHtml(supplierDestinationsMap.get(name)||'')}" placeholder="بدون جهة" style="width:140px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;">
-      <input type="text" class="supplierVatInput num" data-supplier="${escapeHtml(name)}" value="${supplierVatRatesMap.has(name)?supplierVatRatesMap.get(name):''}" placeholder="ضريبة %" style="width:80px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;">
-      <button class="btn btn-ghost saveSupplierDestBtn" data-supplier="${escapeHtml(name)}" style="padding:6px 12px;font-size:12px;">حفظ</button>
-      <span class="supplierDestStatus" style="font-size:11px;color:var(--pine-deep);min-width:16px;"></span>
-    </div>`).join('') || `<div class="empty-state">مفيش موردين مسجّلين لسه.</div>`;
+  els.supplierDestList.innerHTML = suppliers.map(name => {
+    const pay = supplierPaymentMap.get(name) || {};
+    return `
+    <div class="draft-card" data-supplier-row="${escapeHtml(name)}" style="margin-bottom:10px;padding:10px 12px;">
+      <div style="font-weight:600;margin-bottom:8px;">${escapeHtml(name)}</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <input type="text" class="supplierDestInput" list="existingDestinations" data-supplier="${escapeHtml(name)}" value="${escapeHtml(supplierDestinationsMap.get(name)||'')}" placeholder="الجهة" style="width:130px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--white);">
+        <input type="text" class="supplierVatInput num" data-supplier="${escapeHtml(name)}" value="${supplierVatRatesMap.has(name)?supplierVatRatesMap.get(name):''}" placeholder="ضريبة %" style="width:80px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--white);">
+        <select class="supplierPaymentType" data-supplier="${escapeHtml(name)}" style="padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--white);">
+          <option value="" ${!pay.type?'selected':''}>نوع الدفع؟</option>
+          <option value="cash" ${pay.type==='cash'?'selected':''}>كاش</option>
+          <option value="credit" ${pay.type==='credit'?'selected':''}>كريديت</option>
+        </select>
+        <input type="text" class="supplierCreditDays num" data-supplier="${escapeHtml(name)}" value="${(pay.type==='credit'&&pay.creditDays!==null&&pay.creditDays!==undefined)?pay.creditDays:''}" placeholder="أيام الائتمان" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--white);${pay.type==='credit'?'':'display:none;'}">
+        <button class="btn btn-ghost saveSupplierDestBtn" data-supplier="${escapeHtml(name)}" style="padding:6px 12px;font-size:12px;">حفظ</button>
+        <span class="supplierDestStatus" style="font-size:11px;color:var(--pine-deep);min-width:16px;"></span>
+      </div>
+    </div>`;
+  }).join('') || `<div class="empty-state">مفيش موردين مسجّلين لسه.</div>`;
   els.supplierDestOverlay.classList.add('show');
 }
 els.supplierDestBtn.addEventListener('click', openSupplierDestModal);
 els.closeSupplierDestBtn.addEventListener('click', ()=> els.supplierDestOverlay.classList.remove('show'));
 els.supplierDestOverlay.addEventListener('click', (e)=>{ if(e.target===els.supplierDestOverlay) els.supplierDestOverlay.classList.remove('show'); });
+els.supplierDestList.addEventListener('change', (e)=>{
+  if(!e.target.classList.contains('supplierPaymentType')) return;
+  const row = e.target.closest('[data-supplier-row]');
+  const creditInput = row.querySelector('.supplierCreditDays');
+  creditInput.style.display = e.target.value === 'credit' ? '' : 'none';
+});
 els.supplierDestList.addEventListener('click', async (e)=>{
   const btn = e.target.closest('.saveSupplierDestBtn');
   if(!btn) return;
   const supplier = btn.dataset.supplier;
-  const row = btn.closest('div');
+  const row = btn.closest('[data-supplier-row]');
   const destInput = row.querySelector('.supplierDestInput');
   const vatInput = row.querySelector('.supplierVatInput');
+  const paymentSelect = row.querySelector('.supplierPaymentType');
+  const creditInput = row.querySelector('.supplierCreditDays');
   const statusEl = row.querySelector('.supplierDestStatus');
   const vatVal = vatInput.value.trim() === '' ? null : parseFloat(vatInput.value);
+  const paymentVal = paymentSelect.value || null;
+  const creditVal = creditInput.value.trim() === '' ? null : parseFloat(creditInput.value);
   btn.disabled = true;
   try{
-    await saveSupplierSettings(supplier, destInput.value.trim(), vatVal);
+    await saveSupplierSettings(supplier, destInput.value.trim(), vatVal, paymentVal, creditVal);
     statusEl.textContent = '✓';
     setTimeout(()=>{ statusEl.textContent = ''; }, 2000);
     renderDashboard();
@@ -1708,7 +1754,9 @@ function computeSettlementRows(supplierName, fromDate, toDate){
     const subtotal = (inv.items||[]).reduce((s,it)=> s + (Number(it.price)||0), 0);
     const vatRate = (inv.vatRate === undefined || inv.vatRate === null || isNaN(Number(inv.vatRate))) ? 5 : Number(inv.vatRate);
     const vat = subtotal * vatRate / 100;
-    return { id: inv.id, date: inv.date || '', invoiceNumber: inv.invoiceNumber || '', subtotal, vatRate, vat, total: subtotal + vat };
+    const supplierPay = supplierPaymentMap.get(supplierName);
+    const paymentType = inv.paymentType || (supplierPay ? supplierPay.type : '');
+    return { id: inv.id, date: inv.date || '', invoiceNumber: inv.invoiceNumber || '', subtotal, vatRate, vat, total: subtotal + vat, paymentType };
   }).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
 }
 
@@ -1720,6 +1768,14 @@ function populateSettlementSupplierSelect(){
   if(suppliers.includes(current)) els.settlementSupplierSelect.value = current;
 }
 
+function addDaysToDate(dateStr, days){
+  if(!dateStr || days === null || days === undefined || isNaN(days)) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + Number(days));
+  return d.toISOString().slice(0,10);
+}
+
 function renderSettlement(){
   populateSettlementSupplierSelect();
   const supplier = els.settlementSupplierSelect.value;
@@ -1729,28 +1785,40 @@ function renderSettlement(){
     els.settlementTable.innerHTML = `<div class="empty-state">اختار مورد من القايمة فوق عشان تشوف تسويته.</div>`;
     return;
   }
+  const pay = supplierPaymentMap.get(supplier);
+  const paymentBadge = pay
+    ? `<div style="margin-bottom:10px;"><span style="font-size:12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:12px;padding:3px 10px;">افتراضي المورد: ${pay.type==='cash' ? 'كاش' : `كريديت${pay.creditDays?` — ${pay.creditDays} يوم`:''}`}</span></div>`
+    : `<div style="margin-bottom:10px;"><span style="font-size:12px;color:var(--ink-soft);">نوع الدفع الافتراضي غير محدد لهذا المورد — حدده من "إعدادات الموردين"، أو حدده لكل فاتورة وقت الإضافة</span></div>`;
   const rows = computeSettlementRows(supplier, fromDate, toDate);
   if(rows.length === 0){
-    els.settlementTable.innerHTML = `<div class="empty-state">مفيش فواتير لهذا المورد${(fromDate||toDate)?' في الفترة المحددة':''}.</div>`;
+    els.settlementTable.innerHTML = paymentBadge + `<div class="empty-state">مفيش فواتير لهذا المورد${(fromDate||toDate)?' في الفترة المحددة':''}.</div>`;
     return;
   }
+  const anyCredit = rows.some(r=> r.paymentType === 'credit');
+  const today = new Date().toISOString().slice(0,10);
   const grandSubtotal = rows.reduce((s,r)=> s+r.subtotal, 0);
   const grandVat = rows.reduce((s,r)=> s+r.vat, 0);
   const grandTotal = rows.reduce((s,r)=> s+r.total, 0);
-  els.settlementTable.innerHTML = `
+  els.settlementTable.innerHTML = paymentBadge + `
     <table class="items">
       <thead><tr>
-        <th>رقم الفاتورة</th><th>التاريخ</th><th>الإجمالي قبل الضريبة</th><th>نسبة الضريبة</th><th>الضريبة</th><th>الإجمالي شامل الضريبة</th>
+        <th>رقم الفاتورة</th><th>التاريخ</th><th>الإجمالي قبل الضريبة</th><th>نسبة الضريبة</th><th>الضريبة</th><th>الإجمالي شامل الضريبة</th>${anyCredit?'<th>نوع الدفع</th><th>تاريخ الاستحقاق</th>':''}
       </tr></thead>
       <tbody>
-        ${rows.map(r=> `<tr>
+        ${rows.map(r=>{
+          const rowIsCredit = r.paymentType === 'credit';
+          const dueDate = rowIsCredit ? addDaysToDate(r.date, pay ? pay.creditDays : null) : '';
+          const overdue = dueDate && dueDate < today;
+          return `<tr>
           <td class="mono" style="padding:8px 4px;">${escapeHtml(r.invoiceNumber||'—')}</td>
           <td style="padding:8px 4px;">${escapeHtml(r.date||'—')}</td>
           <td class="mono" style="padding:8px 4px;">${fmtPrice(r.subtotal)}</td>
           <td class="mono" style="padding:8px 4px;">${fmtPrice(r.vatRate)}%</td>
           <td class="mono" style="padding:8px 4px;">${fmtPrice(r.vat)}</td>
           <td class="mono" style="padding:8px 4px;">${fmtPrice(r.total)}</td>
-        </tr>`).join('')}
+          ${anyCredit ? `<td style="padding:8px 4px;">${r.paymentType ? (r.paymentType==='cash'?'كاش':'كريديت') : '—'}</td><td class="mono" style="padding:8px 4px;${overdue?'color:var(--brick);font-weight:600;':''}">${escapeHtml(dueDate||'—')}${overdue?' ⚠':''}</td>` : ''}
+        </tr>`;
+        }).join('')}
       </tbody>
       <tfoot>
         <tr style="font-weight:700;border-top:2px solid var(--ink);">
@@ -1759,6 +1827,7 @@ function renderSettlement(){
           <td></td>
           <td class="mono" style="padding:10px 4px;">${fmtPrice(grandVat)}</td>
           <td class="mono" style="padding:10px 4px;">${fmtPrice(grandTotal)} ${escapeHtml(settings.currency)}</td>
+          ${anyCredit?'<td></td><td></td>':''}
         </tr>
       </tfoot>
     </table>`;
@@ -2223,6 +2292,7 @@ function appendDraftCard(data, label){
   const initialVat = (data.vatRate !== undefined && data.vatRate !== null)
     ? data.vatRate
     : (supplierVatRatesMap.has(data.store) ? supplierVatRatesMap.get(data.store) : 5);
+  const initialPayment = data.paymentType || (supplierPaymentMap.get(data.store) ? supplierPaymentMap.get(data.store).type : '');
   const html = `<div class="draft-card" data-draftid="${id}">
     <div class="draft-card-head">
       <div class="draft-card-title">${escapeHtml(label)}</div>
@@ -2237,6 +2307,14 @@ function appendDraftCard(data, label){
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" class="dateField" value="${escapeHtml(data.date||'')}"></div>
       <div class="field" style="max-width:130px;"><label>رقم الفاتورة</label><input type="text" class="invoiceNumberField" value="${escapeHtml(data.invoiceNumber||'')}" placeholder="مثال: 7410"><div class="nameSuggestion"></div></div>
       <div class="field" style="max-width:110px;"><label>نسبة الضريبة %</label><input type="text" class="vatRateField num" value="${initialVat}"></div>
+      <div class="field" style="max-width:110px;">
+        <label>نوع الدفع</label>
+        <select class="paymentTypeField">
+          <option value="" ${!initialPayment?'selected':''}>غير محدد</option>
+          <option value="cash" ${initialPayment==='cash'?'selected':''}>كاش</option>
+          <option value="credit" ${initialPayment==='credit'?'selected':''}>كريديت</option>
+        </select>
+      </div>
     </div>
     <table class="items">
       <thead><tr><th style="width:30%;">المنتج</th><th style="width:16%;">الباركود</th><th style="width:14%;">السعر</th><th style="width:12%;">الكمية</th><th style="width:16%;">الوحدة</th><th></th></tr></thead>
@@ -2290,13 +2368,17 @@ els.draftsContainer.addEventListener('focusout', (e)=>{
   if(e.target.classList && e.target.classList.contains('nameInput')) checkNameSuggestion(e.target);
   if(e.target.classList && e.target.classList.contains('storeField')){
     checkStoreSuggestion(e.target);
-    if(supplierVatRatesMap.has(e.target.value.trim())){
-      const card = e.target.closest('.draft-card');
+    const storeVal = e.target.value.trim();
+    const card = e.target.closest('.draft-card');
+    if(supplierVatRatesMap.has(storeVal)){
       const vatInput = card && card.querySelector('.vatRateField');
-      if(vatInput) vatInput.value = supplierVatRatesMap.get(e.target.value.trim());
+      if(vatInput) vatInput.value = supplierVatRatesMap.get(storeVal);
     }
-    const card2 = e.target.closest('.draft-card');
-    const numInput = card2 && card2.querySelector('.invoiceNumberField');
+    if(supplierPaymentMap.has(storeVal)){
+      const paymentInput = card && card.querySelector('.paymentTypeField');
+      if(paymentInput) paymentInput.value = supplierPaymentMap.get(storeVal).type;
+    }
+    const numInput = card && card.querySelector('.invoiceNumberField');
     if(numInput && numInput.value.trim()) checkInvoiceNumberDuplicate(numInput);
   }
   if(e.target.classList && e.target.classList.contains('invoiceNumberField')) checkInvoiceNumberDuplicate(e.target);
@@ -2311,6 +2393,7 @@ function openEditInvoice(id){
   els.editDateField.value = inv.date || '';
   els.editVatRateField.value = (inv.vatRate === undefined || inv.vatRate === null) ? 5 : inv.vatRate;
   els.editInvoiceNumberField.value = inv.invoiceNumber || '';
+  els.editPaymentTypeField.value = inv.paymentType || '';
   els.editItemsBody.innerHTML = (inv.items && inv.items.length ? inv.items : [{name:'',barcode:'',price:'',qty:1,unit:''}])
     .map(itemRowHtml).join('');
   els.editInvoiceStatus.innerHTML = '';
@@ -2332,6 +2415,7 @@ els.saveEditInvoiceBtn.addEventListener('click', async ()=>{
   const invoiceNumber = els.editInvoiceNumberField.value.trim();
   const vatRate = parseFloat(els.editVatRateField.value);
   const finalVat = isNaN(vatRate) ? 5 : vatRate;
+  const paymentType = els.editPaymentTypeField.value || '';
   const rows = [...els.editItemsBody.querySelectorAll('tr')];
   const items = rows.map(r=>{
     const name = r.querySelector('.nameInput').value.trim();
@@ -2348,9 +2432,9 @@ els.saveEditInvoiceBtn.addEventListener('click', async ()=>{
   els.saveEditInvoiceBtn.disabled = true;
   els.editInvoiceStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الحفظ...</div>`;
   try{
-    await updateInvoiceRemote(editingInvoiceId, store, date, items, finalVat, invoiceNumber);
+    await updateInvoiceRemote(editingInvoiceId, store, date, items, finalVat, invoiceNumber, paymentType);
     const inv = invoices.find(i => String(i.id) === String(editingInvoiceId));
-    if(inv){ inv.store = store; inv.date = date; inv.vatRate = finalVat; inv.invoiceNumber = invoiceNumber; inv.items = items; }
+    if(inv){ inv.store = store; inv.date = date; inv.vatRate = finalVat; inv.invoiceNumber = invoiceNumber; inv.paymentType = paymentType; inv.items = items; }
     els.editInvoiceOverlay.classList.remove('show');
     renderAll();
   }catch(e){
@@ -2372,6 +2456,7 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
     const date = card.querySelector('.dateField').value || '';
     const invoiceNumber = card.querySelector('.invoiceNumberField').value.trim();
     const vatRate = parseFloat(card.querySelector('.vatRateField').value);
+    const paymentType = card.querySelector('.paymentTypeField').value || '';
     const rows = [...card.querySelectorAll('.itemsBody tr')];
     const items = rows.map(r=>{
       const name = r.querySelector('.nameInput').value.trim();
@@ -2383,8 +2468,8 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
     }).filter(it => it.name && !isNaN(it.price));
     if(items.length === 0){ skippedCount++; continue; }
     try{
-      const newId = await insertInvoiceRemote(store, date, items, vatRate, invoiceNumber);
-      invoices.push({ id: newId, store, date, vatRate: isNaN(vatRate)?5:vatRate, invoiceNumber, items });
+      const newId = await insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, paymentType);
+      invoices.push({ id: newId, store, date, vatRate: isNaN(vatRate)?5:vatRate, invoiceNumber, paymentType, items });
       savedCount++;
     }catch(e){
       console.error(e);
