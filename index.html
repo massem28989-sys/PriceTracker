@@ -287,8 +287,9 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     <button class="btn btn-ghost contributor-ok" id="importBtn">استيراد بيانات</button>
   </div>
 
-  <div style="display:flex;gap:8px;margin-bottom:6px;">
+  <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
     <button class="btn btn-ghost tab-btn active" id="tabProductsBtn">المنتجات</button>
+    <button class="btn btn-ghost tab-btn" id="tabHistoryBtn">سجل الفواتير</button>
     <button class="btn btn-ghost tab-btn" id="tabReportsBtn">التقارير الشهرية</button>
     <button class="btn btn-ghost tab-btn" id="tabSettlementBtn">تسوية الموردين</button>
   </div>
@@ -312,19 +313,21 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   </div>
   <datalist id="existingDestinations"></datalist>
   <div id="productList"></div>
-
-  <div class="section-title">
-    <span>سجل الفواتير</span>
-    <span id="invoiceCount" style="font-weight:400;"></span>
-  </div>
-  <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-    <input type="text" id="historySearchInput" placeholder="ابحث بالمورد أو رقم الفاتورة..." style="flex:1;min-width:160px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
-    <input type="date" id="historyFromDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
-    <input type="date" id="historyToDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
-    <button class="btn btn-ghost" id="historySortToggleBtn" style="font-size:12px;">الأحدث أولاً</button>
-  </div>
-  <div id="invoiceHistory"></div>
   </div><!-- /productsView -->
+
+  <div id="historyView" style="display:none;">
+    <div class="section-title">
+      <span>سجل الفواتير</span>
+      <span id="invoiceCount" style="font-weight:400;"></span>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+      <input type="text" id="historySearchInput" placeholder="ابحث بالمورد أو رقم الفاتورة..." style="flex:1;min-width:160px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+      <input type="date" id="historyFromDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+      <input type="date" id="historyToDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+      <button class="btn btn-ghost" id="historySortToggleBtn" style="font-size:12px;">الأحدث أولاً</button>
+    </div>
+    <div id="invoiceHistory"></div>
+  </div>
 
   <div id="reportsView" style="display:none;">
     <div class="section-title">
@@ -698,7 +701,9 @@ const els = {
   supplierMergeStatus: document.getElementById('supplierMergeStatus'),
   tabProductsBtn: document.getElementById('tabProductsBtn'),
   tabReportsBtn: document.getElementById('tabReportsBtn'),
+  tabHistoryBtn: document.getElementById('tabHistoryBtn'),
   productsView: document.getElementById('productsView'),
+  historyView: document.getElementById('historyView'),
   reportsView: document.getElementById('reportsView'),
   monthlyChart: document.getElementById('monthlyChart'),
   categoryBreakdown: document.getElementById('categoryBreakdown'),
@@ -1753,32 +1758,24 @@ els.exportReportsBtn.addEventListener('click', ()=>{
   XLSX.writeFile(wb, 'تقرير-الصرف.xlsx');
 });
 
-els.tabProductsBtn.addEventListener('click', ()=>{
-  els.productsView.style.display = 'block';
-  els.reportsView.style.display = 'none';
-  els.settlementView.style.display = 'none';
-  els.tabProductsBtn.classList.add('active');
-  els.tabReportsBtn.classList.remove('active');
-  els.tabSettlementBtn.classList.remove('active');
-});
-els.tabReportsBtn.addEventListener('click', ()=>{
-  els.productsView.style.display = 'none';
-  els.reportsView.style.display = 'block';
-  els.settlementView.style.display = 'none';
-  els.tabReportsBtn.classList.add('active');
-  els.tabProductsBtn.classList.remove('active');
-  els.tabSettlementBtn.classList.remove('active');
-  renderReports();
-});
-els.tabSettlementBtn.addEventListener('click', ()=>{
-  els.productsView.style.display = 'none';
-  els.reportsView.style.display = 'none';
-  els.settlementView.style.display = 'block';
-  els.tabSettlementBtn.classList.add('active');
-  els.tabProductsBtn.classList.remove('active');
-  els.tabReportsBtn.classList.remove('active');
-  renderSettlement();
-});
+const TAB_VIEWS = [
+  { btn: 'tabProductsBtn', view: 'productsView' },
+  { btn: 'tabHistoryBtn', view: 'historyView' },
+  { btn: 'tabReportsBtn', view: 'reportsView' },
+  { btn: 'tabSettlementBtn', view: 'settlementView' },
+];
+function switchTab(activeBtnKey, onShow){
+  TAB_VIEWS.forEach(({btn, view})=>{
+    const isActive = btn === activeBtnKey;
+    els[view].style.display = isActive ? 'block' : 'none';
+    els[btn].classList.toggle('active', isActive);
+  });
+  if(onShow) onShow();
+}
+els.tabProductsBtn.addEventListener('click', ()=> switchTab('tabProductsBtn'));
+els.tabHistoryBtn.addEventListener('click', ()=> switchTab('tabHistoryBtn'));
+els.tabReportsBtn.addEventListener('click', ()=> switchTab('tabReportsBtn', renderReports));
+els.tabSettlementBtn.addEventListener('click', ()=> switchTab('tabSettlementBtn', renderSettlement));
 
 function normalizeInvoiceNumber(s){
   // بيشيل أي بادئة/رموز (INV-, #, مسافات) والأصفار البادئة عشان "7410" تتطابق
