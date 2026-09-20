@@ -71,8 +71,11 @@ main{max-width:920px;margin:0 auto;padding:24px 24px 0;}
 }
 .notice-banner b{color:var(--ink);}
 body.is-member-view .owner-only{display:none !important;}
+body.cannot-contribute .contributor-ok{display:none !important;}
 .viewonly-badge{display:none;background:#EFE8D6;border:1px solid var(--line);border-radius:12px;padding:2px 10px;font-size:11px;color:var(--ink-soft);white-space:nowrap;}
 body.is-member-view .viewonly-badge{display:inline-block;}
+.contributor-badge{display:none;background:#E8F0EC;border:1px solid var(--pine);border-radius:12px;padding:2px 10px;font-size:11px;color:var(--pine-deep);white-space:nowrap;}
+body.can-contribute-only .contributor-badge{display:inline-block;}
 .tab-btn.active{background:var(--pine-deep);color:var(--white);border-color:var(--pine-deep);}
 .member-view-note{display:none;font-size:12px;color:var(--ink-soft);background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;padding:8px 12px;margin-bottom:12px;}
 body.is-member-view .member-view-note{display:block;}
@@ -253,7 +256,8 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <span class="viewonly-badge">👁 عرض فقط</span>
-      <button class="btn btn-primary owner-only" id="openAddBtn">+ إضافة فواتير</button>
+      <span class="contributor-badge">✎ مساهم — يضيف فواتير بس</span>
+      <button class="btn btn-primary contributor-ok" id="openAddBtn">+ إضافة فواتير</button>
       <button class="btn btn-ghost" id="teamBtn" style="display:none;">👥 الفريق</button>
       <button class="btn btn-ghost" id="logoutBtn" style="display:none;">خروج</button>
     </div>
@@ -280,7 +284,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       <input type="text" class="currency-input" id="currencyInput" maxlength="6" value="ج.م">
     </div>
     <button class="btn btn-ghost" id="exportBtn">تصدير Excel</button>
-    <button class="btn btn-ghost owner-only" id="importBtn">استيراد بيانات</button>
+    <button class="btn btn-ghost contributor-ok" id="importBtn">استيراد بيانات</button>
   </div>
 
   <div style="display:flex;gap:8px;margin-bottom:6px;">
@@ -312,6 +316,12 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   <div class="section-title">
     <span>سجل الفواتير</span>
     <span id="invoiceCount" style="font-weight:400;"></span>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+    <input type="text" id="historySearchInput" placeholder="ابحث بالمورد أو رقم الفاتورة..." style="flex:1;min-width:160px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+    <input type="date" id="historyFromDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+    <input type="date" id="historyToDate" style="padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);">
+    <button class="btn btn-ghost" id="historySortToggleBtn" style="font-size:12px;">الأحدث أولاً</button>
   </div>
   <div id="invoiceHistory"></div>
   </div><!-- /productsView -->
@@ -412,6 +422,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
         </div>
       </div>
       <div class="section-title" style="margin-top:0;"><span>الأعضاء</span></div>
+      <p class="hint" style="margin:0 0 8px;">لو انت المالك، تقدر تغيّر دور أي عضو: "عضو" يشوف بس، "مساهم" يقدر يضيف فواتير جديدة بس مش يعدّل أو يمسح أي حاجة.</p>
       <div id="teamMembersList"></div>
       <button class="btn-danger-text" id="deleteWorkspaceBtn" style="display:none;margin-top:16px;">حذف مساحة العمل دي نهائيًا</button>
     </div>
@@ -636,6 +647,10 @@ const els = {
   clearBulkSelectionBtn: document.getElementById('clearBulkSelectionBtn'),
   invoiceHistory: document.getElementById('invoiceHistory'),
   invoiceCount: document.getElementById('invoiceCount'),
+  historySearchInput: document.getElementById('historySearchInput'),
+  historyFromDate: document.getElementById('historyFromDate'),
+  historyToDate: document.getElementById('historyToDate'),
+  historySortToggleBtn: document.getElementById('historySortToggleBtn'),
   searchInput: document.getElementById('searchInput'),
   currencyInput: document.getElementById('currencyInput'),
   exportBtn: document.getElementById('exportBtn'),
@@ -830,8 +845,12 @@ async function loadWorkspaces(){
 }
 
 function applyRolePermissions(){
-  const isOwner = currentWorkspace && currentWorkspace.role === 'owner';
+  const role = currentWorkspace ? currentWorkspace.role : null;
+  const isOwner = role === 'owner';
+  const canContribute = role === 'owner' || role === 'contributor';
   document.body.classList.toggle('is-member-view', !isOwner);
+  document.body.classList.toggle('cannot-contribute', !canContribute);
+  document.body.classList.toggle('can-contribute-only', canContribute && !isOwner);
   els.currencyInput.disabled = !isOwner;
 }
 
@@ -890,13 +909,38 @@ function openTeamModal(){
     els.deleteWorkspaceBtn.style.display = currentWorkspace.role === 'owner' ? 'inline-block' : 'none';
     els.teamMembersList.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري التحميل...</div>`;
     loadTeamMembers(currentWorkspace.id).then(members=>{
-      els.teamMembersList.innerHTML = members.map(m=>
-        `<div class="history-row"><span>${escapeHtml(m.email)}</span><span style="color:var(--ink-soft);font-size:12px;">${m.role==='owner'?'مالك':'عضو'}</span></div>`
-      ).join('') || `<div class="empty-state">مفيش أعضاء.</div>`;
+      const iAmOwner = currentWorkspace.role === 'owner';
+      els.teamMembersList.innerHTML = members.map(m=>{
+        const canManage = iAmOwner && m.role !== 'owner';
+        return `<div class="history-row" style="align-items:center;">
+          <span>${escapeHtml(m.email)}</span>
+          ${canManage
+            ? `<select class="memberRoleSelect" data-userid="${escapeHtml(m.user_id)}" style="font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--white);">
+                <option value="member" ${m.role==='member'?'selected':''}>عضو (عرض فقط)</option>
+                <option value="contributor" ${m.role==='contributor'?'selected':''}>مساهم (يضيف فواتير)</option>
+              </select>`
+            : `<span style="color:var(--ink-soft);font-size:12px;">${m.role==='owner'?'مالك':(m.role==='contributor'?'مساهم':'عضو')}</span>`}
+        </div>`;
+      }).join('') || `<div class="empty-state">مفيش أعضاء.</div>`;
     });
   }
   els.teamOverlay.classList.add('show');
 }
+els.teamMembersList.addEventListener('change', async (e)=>{
+  if(!e.target.classList.contains('memberRoleSelect')) return;
+  const userId = e.target.dataset.userid;
+  const newRole = e.target.value;
+  e.target.disabled = true;
+  try{
+    const { error } = await sb.from('workspace_members').update({ role: newRole }).eq('workspace_id', currentWorkspace.id).eq('user_id', userId);
+    if(error) throw error;
+  }catch(err){
+    console.error(err);
+    alert('فشل تغيير الدور: ' + (err.message || err));
+  }finally{
+    e.target.disabled = false;
+  }
+});
 els.teamBtn.addEventListener('click', openTeamModal);
 els.closeTeamBtn.addEventListener('click', ()=>{
   if(myWorkspaces.length === 0) return; // must create/join first
@@ -2024,6 +2068,15 @@ els.statementFileInput.addEventListener('change', async ()=>{
   els.statementFileInput.value = '';
 });
 
+let historySortDesc = true;
+const ARABIC_MONTH_NAMES = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+function monthGroupLabel(key){
+  if(key === 'بدون تاريخ') return key;
+  const [y,m] = key.split('-');
+  const idx = parseInt(m,10) - 1;
+  return `${ARABIC_MONTH_NAMES[idx] || m} ${y}`;
+}
+
 function renderHistory(){
   els.invoiceCount.textContent = invoices.length ? `${invoices.length} فاتورة` : '';
   if(invoices.length === 0){
@@ -2031,20 +2084,56 @@ function renderHistory(){
     return;
   }
   const isOwner = currentWorkspace && currentWorkspace.role === 'owner';
-  const sorted = [...invoices].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
-  els.invoiceHistory.innerHTML = sorted.map(inv=>{
-    const itemCount = (inv.items||[]).length;
-    const total = (inv.items||[]).reduce((s,it)=> s + (Number(it.price)||0), 0);
-    return `<div class="invoice-item">
-      <div>
-        <div class="store">${escapeHtml(inv.store || 'بدون اسم مورد')}</div>
-        <div class="sub">${inv.invoiceNumber ? `فاتورة رقم ${escapeHtml(inv.invoiceNumber)} · ` : ''}${escapeHtml(inv.date || 'بدون تاريخ')} · ${itemCount} صنف</div>
+  const q = normName(els.historySearchInput.value).toLowerCase();
+  const fromDate = els.historyFromDate.value || '';
+  const toDate = els.historyToDate.value || '';
+
+  let filtered = invoices.filter(inv=>{
+    if(fromDate && (!inv.date || inv.date < fromDate)) return false;
+    if(toDate && (!inv.date || inv.date > toDate)) return false;
+    if(q){
+      const hay = `${inv.store||''} ${inv.invoiceNumber||''}`.toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  filtered.sort((a,b)=> historySortDesc ? (b.date||'').localeCompare(a.date||'') : (a.date||'').localeCompare(b.date||''));
+
+  if(filtered.length === 0){
+    els.invoiceHistory.innerHTML = `<div class="empty-state">مفيش فواتير مطابقة للبحث/الفترة.</div>`;
+    return;
+  }
+
+  const groups = new Map(); // 'YYYY-MM' -> invoices[]
+  filtered.forEach(inv=>{
+    const key = inv.date ? inv.date.slice(0,7) : 'بدون تاريخ';
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(inv);
+  });
+
+  els.invoiceHistory.innerHTML = [...groups.entries()].map(([monthKey, invs])=>{
+    const monthTotal = invs.reduce((s,inv)=> s + (inv.items||[]).reduce((s2,it)=> s2+(Number(it.price)||0), 0), 0);
+    const rowsHtml = invs.map(inv=>{
+      const itemCount = (inv.items||[]).length;
+      const total = (inv.items||[]).reduce((s,it)=> s + (Number(it.price)||0), 0);
+      return `<div class="invoice-item">
+        <div>
+          <div class="store">${escapeHtml(inv.store || 'بدون اسم مورد')}</div>
+          <div class="sub">${inv.invoiceNumber ? `فاتورة رقم ${escapeHtml(inv.invoiceNumber)} · ` : ''}${escapeHtml(inv.date || 'بدون تاريخ')} · ${itemCount} صنف</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div class="mono">${fmtPrice(total)} ${escapeHtml(settings.currency)}</div>
+          ${isOwner ? `<button class="edit-invoice-btn" data-editid="${inv.id}" style="background:none;border:none;color:var(--pine-deep);cursor:pointer;font-family:inherit;font-size:13px;">تعديل</button>
+          <button class="btn-danger-text" data-id="${inv.id}">حذف</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    return `<div>
+      <div style="font-size:12px;font-weight:600;color:var(--ink-soft);background:var(--paper-raised);padding:7px 10px;border-radius:3px;margin-top:14px;display:flex;justify-content:space-between;">
+        <span>${escapeHtml(monthGroupLabel(monthKey))} (${invs.length})</span>
+        <span class="mono">${fmtPrice(monthTotal)} ${escapeHtml(settings.currency)}</span>
       </div>
-      <div style="display:flex;align-items:center;gap:14px;">
-        <div class="mono">${fmtPrice(total)} ${escapeHtml(settings.currency)}</div>
-        ${isOwner ? `<button class="edit-invoice-btn" data-editid="${inv.id}" style="background:none;border:none;color:var(--pine-deep);cursor:pointer;font-family:inherit;font-size:13px;">تعديل</button>
-        <button class="btn-danger-text" data-id="${inv.id}">حذف</button>` : ''}
-      </div>
+      ${rowsHtml}
     </div>`;
   }).join('');
 
@@ -2061,6 +2150,14 @@ function renderHistory(){
     btn.addEventListener('click', ()=> openEditInvoice(btn.dataset.editid));
   });
 }
+els.historySearchInput.addEventListener('input', renderHistory);
+els.historyFromDate.addEventListener('change', renderHistory);
+els.historyToDate.addEventListener('change', renderHistory);
+els.historySortToggleBtn.addEventListener('click', ()=>{
+  historySortDesc = !historySortDesc;
+  els.historySortToggleBtn.textContent = historySortDesc ? 'الأحدث أولاً' : 'الأقدم أولاً';
+  renderHistory();
+});
 
 function renderAll(){ renderDashboard(); renderHistory(); }
 
