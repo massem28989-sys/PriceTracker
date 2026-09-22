@@ -557,7 +557,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       </div>
     </div>
     <table class="items">
-      <thead><tr><th style="width:30%;">المنتج</th><th style="width:16%;">الباركود</th><th style="width:14%;">السعر</th><th style="width:12%;">الكمية</th><th style="width:16%;">الوحدة</th><th></th></tr></thead>
+      <thead><tr><th style="width:22%;">المنتج</th><th style="width:12%;">الباركود</th><th style="width:11%;">السعر</th><th style="width:9%;">الكمية</th><th style="width:12%;">الوحدة</th><th style="width:16%;">الجهة</th><th></th></tr></thead>
       <tbody class="itemsBody" id="editItemsBody"></tbody>
     </table>
     <button class="add-row-btn" id="editAddRowBtn">+ إضافة سطر</button>
@@ -609,7 +609,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     "store": "اسم المورد",
     "date": "2026-08-10",
     "items": [
-      {"name": "أرز 10 كيلو", "barcode": "2000000002569", "price": 78, "qty": 20, "unit": "كيس"}
+      {"name": "أرز 10 كيلو", "barcode": "2000000002569", "price": 78, "qty": 20, "unit": "كيس", "destination": "المخزن"}
     ]
   }
 ]'></textarea>
@@ -1109,6 +1109,11 @@ async function saveSupplierSettings(supplierName, destination, vatRate, paymentT
 
 // الجهة الفعلية لمنتج: لو له جهة محددة بنفسه بتتقدّم، وإلا بيرث جهة آخر مورد اشتُري منه
 function effectiveDestination(key, entry){
+  // الأولوية: جهة آخر صنف اتسجل بيه فعليًا > جهة المنتج الافتراضية > جهة المورد الافتراضية
+  if(entry && entry.points && entry.points.length){
+    const lastPoint = entry.points[entry.points.length-1];
+    if(lastPoint.destination) return lastPoint.destination;
+  }
   const direct = destinationsMap.get(key);
   if(direct) return direct;
   if(entry && entry.points && entry.points.length){
@@ -1118,6 +1123,7 @@ function effectiveDestination(key, entry){
   return '';
 }
 function effectiveDestinationForItem(it, storeName){
+  if(it.destination) return it.destination;
   const direct = destinationsMap.get(productKey(it));
   if(direct) return direct;
   if(storeName && supplierDestinationsMap.has(storeName)) return supplierDestinationsMap.get(storeName);
@@ -1128,7 +1134,7 @@ async function refreshInvoicesFromServer(){
   if(!currentWorkspace){ invoices = []; return; }
   const { data, error } = await sb
     .from('invoices')
-    .select('id, store, invoice_date, vat_rate, invoice_number, payment_type, invoice_items(id, name, barcode, price, qty, unit)')
+    .select('id, store, invoice_date, vat_rate, invoice_number, payment_type, invoice_items(id, name, barcode, price, qty, unit, destination)')
     .eq('workspace_id', currentWorkspace.id)
     .order('invoice_date', { ascending: true });
   if(error){ console.error(error); invoices = []; return; }
@@ -1140,7 +1146,7 @@ async function refreshInvoicesFromServer(){
     invoiceNumber: r.invoice_number || '',
     paymentType: r.payment_type || '',
     items: (r.invoice_items || []).map(it => ({
-      id: it.id, name: it.name, barcode: it.barcode || '', price: Number(it.price), qty: Number(it.qty) || 1, unit: it.unit || ''
+      id: it.id, name: it.name, barcode: it.barcode || '', price: Number(it.price), qty: Number(it.qty) || 1, unit: it.unit || '', destination: it.destination || ''
     }))
   }));
 }
@@ -1158,7 +1164,7 @@ async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, p
     .single();
   if(invErr) throw invErr;
   const payload = items.map(it => ({
-    invoice_id: invRow.id, name: it.name, barcode: it.barcode || null, price: it.price, qty: it.qty || 1, unit: it.unit || null
+    invoice_id: invRow.id, name: it.name, barcode: it.barcode || null, price: it.price, qty: it.qty || 1, unit: it.unit || null, destination: it.destination || null
   }));
   const { error: itemsErr } = await sb.from('invoice_items').insert(payload);
   if(itemsErr) throw itemsErr;
@@ -1181,7 +1187,7 @@ async function updateInvoiceRemote(id, store, date, items, vatRate, invoiceNumbe
   if(e2) throw e2;
   if(items.length){
     const payload = items.map(it => ({
-      invoice_id: id, name: it.name, barcode: it.barcode || null, price: it.price, qty: it.qty || 1, unit: it.unit || null
+      invoice_id: id, name: it.name, barcode: it.barcode || null, price: it.price, qty: it.qty || 1, unit: it.unit || null, destination: it.destination || null
     }));
     const { error: e3 } = await sb.from('invoice_items').insert(payload);
     if(e3) throw e3;
@@ -1242,7 +1248,7 @@ function getProductSeries(){
       const factor = (conv && unit && conv.has(unit)) ? conv.get(unit) : 1;
       const unitPrice = it.price / (qty * factor);
       if(!map.has(key)) map.set(key, { displayName: name, barcode: (it.barcode||'').toString().trim(), unit: normName(it.unit||''), points: [] });
-      map.get(key).points.push({ id: it.id, date: inv.date || '', store: inv.store || '', price: it.price, qty, unit: it.unit || '', unitPrice, name, barcode: it.barcode || '' });
+      map.get(key).points.push({ id: it.id, date: inv.date || '', store: inv.store || '', price: it.price, qty, unit: it.unit || '', unitPrice, name, barcode: it.barcode || '', destination: it.destination || '' });
     }
   }
   for(const entry of map.values()){
@@ -2304,11 +2310,11 @@ els.testConnBtn.addEventListener('click', async ()=>{
 els.manualAddBtn.addEventListener('click', ()=>{
   els.addStep1.style.display='none';
   els.draftsContainer.innerHTML = '';
-  appendDraftCard({store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',price:'',qty:1,unit:''}]}, 'فاتورة يدوية');
+  appendDraftCard({store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}]}, 'فاتورة يدوية');
   els.addStep2.style.display = 'block';
 });
 els.addDraftBtn.addEventListener('click', ()=>{
-  appendDraftCard({store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',price:'',qty:1,unit:''}]}, 'فاتورة يدوية');
+  appendDraftCard({store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}]}, 'فاتورة يدوية');
 });
 
 function itemRowHtml(item){
@@ -2321,6 +2327,7 @@ function itemRowHtml(item){
     <td><input type="text" class="priceInput num" value="${item.price!==undefined&&item.price!==''?item.price:''}" placeholder="0.00"></td>
     <td><input type="text" class="qtyInput num" value="${item.qty!==undefined&&item.qty!==''?item.qty:1}" placeholder="1"></td>
     <td><input type="text" class="unitInput" value="${escapeHtml(item.unit||'')}" placeholder="كيلو/قطعة"></td>
+    <td><input type="text" class="destinationInput" list="existingDestinations" value="${escapeHtml(item.destination||'')}" placeholder="الجهة"></td>
     <td><button class="remove-row" title="حذف السطر">×</button></td>
   </tr>`;
 }
@@ -2381,8 +2388,13 @@ function checkAllNameSuggestions(scope){
 
 function appendDraftCard(data, label){
   const id = draftIdCounter++;
-  const rowsHtml = (data.items && data.items.length ? data.items : [{name:'',barcode:'',price:'',qty:1,unit:''}])
-    .map(itemRowHtml).join('');
+  const itemsWithDest = (data.items && data.items.length ? data.items : [{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}])
+    .map(it => {
+      if(it.destination) return it;
+      const guess = destinationsMap.get(productKey(it)) || (data.store && supplierDestinationsMap.get(data.store)) || '';
+      return { ...it, destination: guess };
+    });
+  const rowsHtml = itemsWithDest.map(itemRowHtml).join('');
   const initialVat = (data.vatRate !== undefined && data.vatRate !== null)
     ? data.vatRate
     : (supplierVatRatesMap.has(data.store) ? supplierVatRatesMap.get(data.store) : 5);
@@ -2411,7 +2423,7 @@ function appendDraftCard(data, label){
       </div>
     </div>
     <table class="items">
-      <thead><tr><th style="width:30%;">المنتج</th><th style="width:16%;">الباركود</th><th style="width:14%;">السعر</th><th style="width:12%;">الكمية</th><th style="width:16%;">الوحدة</th><th></th></tr></thead>
+      <thead><tr><th style="width:22%;">المنتج</th><th style="width:12%;">الباركود</th><th style="width:11%;">السعر</th><th style="width:9%;">الكمية</th><th style="width:12%;">الوحدة</th><th style="width:16%;">الجهة</th><th></th></tr></thead>
       <tbody class="itemsBody">${rowsHtml}</tbody>
     </table>
     <button class="add-row-btn">+ إضافة سطر</button>
@@ -2426,7 +2438,7 @@ els.draftsContainer.addEventListener('click', (e)=>{
   const addBtn = e.target.closest('.add-row-btn');
   if(addBtn){
     const card = addBtn.closest('.draft-card');
-    card.querySelector('.itemsBody').insertAdjacentHTML('beforeend', itemRowHtml({name:'',barcode:'',price:'',qty:1,unit:''}));
+    card.querySelector('.itemsBody').insertAdjacentHTML('beforeend', itemRowHtml({name:'',barcode:'',destination:'',price:'',qty:1,unit:''}));
     return;
   }
   const rmRow = e.target.closest('.remove-row');
@@ -2472,6 +2484,11 @@ els.draftsContainer.addEventListener('focusout', (e)=>{
       const paymentInput = card && card.querySelector('.paymentTypeField');
       if(paymentInput) paymentInput.value = supplierPaymentMap.get(storeVal).type;
     }
+    if(supplierDestinationsMap.has(storeVal) && card){
+      card.querySelectorAll('.destinationInput').forEach(destInput=>{
+        if(!destInput.value.trim()) destInput.value = supplierDestinationsMap.get(storeVal);
+      });
+    }
     const numInput = card && card.querySelector('.invoiceNumberField');
     if(numInput && numInput.value.trim()) checkInvoiceNumberDuplicate(numInput);
   }
@@ -2488,7 +2505,7 @@ function openEditInvoice(id){
   els.editVatRateField.value = (inv.vatRate === undefined || inv.vatRate === null) ? 5 : inv.vatRate;
   els.editInvoiceNumberField.value = inv.invoiceNumber || '';
   els.editPaymentTypeField.value = inv.paymentType || '';
-  els.editItemsBody.innerHTML = (inv.items && inv.items.length ? inv.items : [{name:'',barcode:'',price:'',qty:1,unit:''}])
+  els.editItemsBody.innerHTML = (inv.items && inv.items.length ? inv.items : [{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}])
     .map(itemRowHtml).join('');
   els.editInvoiceStatus.innerHTML = '';
   els.editInvoiceOverlay.classList.add('show');
@@ -2497,7 +2514,7 @@ els.closeEditInvoiceBtn.addEventListener('click', ()=> els.editInvoiceOverlay.cl
 els.cancelEditInvoiceBtn.addEventListener('click', ()=> els.editInvoiceOverlay.classList.remove('show'));
 els.editInvoiceOverlay.addEventListener('click', (e)=>{ if(e.target===els.editInvoiceOverlay) els.editInvoiceOverlay.classList.remove('show'); });
 els.editAddRowBtn.addEventListener('click', ()=>{
-  els.editItemsBody.insertAdjacentHTML('beforeend', itemRowHtml({name:'',barcode:'',price:'',qty:1,unit:''}));
+  els.editItemsBody.insertAdjacentHTML('beforeend', itemRowHtml({name:'',barcode:'',destination:'',price:'',qty:1,unit:''}));
 });
 els.editItemsBody.addEventListener('click', (e)=>{
   const rm = e.target.closest('.remove-row');
@@ -2517,7 +2534,8 @@ els.saveEditInvoiceBtn.addEventListener('click', async ()=>{
     const price = parseFloat(r.querySelector('.priceInput').value);
     const qty = parseFloat(r.querySelector('.qtyInput').value) || 1;
     const unit = r.querySelector('.unitInput').value.trim();
-    return { name, barcode, price, qty, unit };
+    const destination = r.querySelector('.destinationInput').value.trim();
+    return { name, barcode, price, qty, unit, destination };
   }).filter(it => it.name && !isNaN(it.price));
   if(items.length === 0){
     els.editInvoiceStatus.innerHTML = `<div class="error-box">لازم صنف واحد على الأقل بسعره.</div>`;
@@ -2558,7 +2576,8 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
       const price = parseFloat(r.querySelector('.priceInput').value);
       const qty = parseFloat(r.querySelector('.qtyInput').value) || 1;
       const unit = r.querySelector('.unitInput').value.trim();
-      return { name, barcode, price, qty, unit };
+      const destination = r.querySelector('.destinationInput').value.trim();
+      return { name, barcode, price, qty, unit, destination };
     }).filter(it => it.name && !isNaN(it.price));
     if(items.length === 0){ skippedCount++; continue; }
     try{
@@ -2629,7 +2648,8 @@ els.doImportBtn.addEventListener('click', async ()=>{
       barcode: it.barcode ? String(it.barcode).trim() : '',
       price: typeof it.price === 'number' ? it.price : parseFloat(it.price),
       qty: (typeof it.qty === 'number' ? it.qty : parseFloat(it.qty)) || 1,
-      unit: it.unit || ''
+      unit: it.unit || '',
+      destination: it.destination || ''
     })).filter(it=> it.name && !isNaN(it.price));
     if(items.length === 0){ skipped++; continue; }
     const store = (inv.store||'').toString().trim();
@@ -2909,7 +2929,7 @@ els.startAnalysisBtn.addEventListener('click', async ()=>{
       const w = work[idx];
       if(!w.images){
         appendDraftCard(
-          {store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',price:'',qty:1,unit:''}]},
+          {store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}]},
           `${w.label} — أدخل البيانات يدويًا`
         );
       } else {
@@ -2919,7 +2939,7 @@ els.startAnalysisBtn.addEventListener('click', async ()=>{
         }catch(e){
           console.error(e);
           if(!cancelRequested) appendDraftCard(
-            {store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',price:'',qty:1,unit:''}]},
+            {store:'', date:new Date().toISOString().slice(0,10), items:[{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}]},
             `${w.label} — تعذّر التحليل تلقائيًا (${e.message || 'خطأ غير معروف'})، أدخل البيانات يدويًا`
           );
         }
