@@ -430,6 +430,29 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   .ap-form-grid{grid-template-columns:1fr;}
 }
 /* ==== PAYABLES CSS END ==== */
+/* ==== DATA HEALTH CSS START ==== */
+.dh-sec{border:1px solid var(--line);border-radius:6px;background:var(--paper-raised);margin-bottom:10px;overflow:hidden;}
+.dh-sec.done{opacity:.6;}
+.dh-head{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;padding:12px 14px;font-family:inherit;color:var(--ink);cursor:pointer;text-align:right;}
+.dh-n{min-width:34px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;padding:0 8px;}
+.dh-n.err{background:#F6DCD4;color:#7A2A1B;}
+.dh-n.warn{background:#F7EBCB;color:#6B4B0C;}
+.dh-n.ok{background:#DCEBDF;color:#24563A;}
+.dh-t{flex:1;display:flex;flex-direction:column;gap:2px;}
+.dh-t b{font-size:14px;}
+.dh-t small{font-size:12px;color:var(--ink-soft);}
+.dh-arrow{color:var(--ink-soft);}
+.dh-body{border-top:1px solid var(--line-soft);padding:8px 14px 12px;background:var(--white);}
+.dh-group{border:1px dashed var(--line);border-radius:5px;padding:8px 10px;margin:8px 0;}
+.dh-why{font-size:12px;color:var(--brick);font-weight:600;margin-bottom:4px;}
+.dh-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap;}
+.dh-row:last-child{border-bottom:none;}
+.dh-main{flex:1;min-width:220px;font-size:13px;display:flex;flex-direction:column;gap:3px;}
+.dh-main small{font-size:12px;color:var(--ink-soft);}
+.dh-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.dh-acts .ap-btn{padding:5px 10px;font-size:12px;}
+/* ==== DATA HEALTH CSS END ==== */
+
 </style>
 </head>
 <body>
@@ -479,6 +502,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     <button class="btn btn-ghost tab-btn" id="tabHistoryBtn">سجل الفواتير</button>
     <button class="btn btn-ghost tab-btn" id="tabReportsBtn">التقارير الشهرية</button>
     <button class="btn btn-ghost tab-btn" id="tabSettlementBtn">تسوية الموردين</button>
+    <button class="btn btn-ghost tab-btn" id="tabHealthBtn">فحص البيانات</button>
   </div>
 
   <div id="productsView">
@@ -502,6 +526,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   <div id="productList"></div>
   </div><!-- /productsView -->
 
+  <div id="healthView" style="display:none;"><div id="dhRoot"></div></div>
   <!-- ==== PAYABLES VIEW START ==== -->
   <div id="payablesView" style="display:none;">
     <div id="apRoot"></div>
@@ -2610,7 +2635,7 @@ els.historySortToggleBtn.addEventListener('click', ()=>{
   renderHistory();
 });
 
-function renderAll(){ renderDashboard(); renderHistory(); if(els.payablesView && els.payablesView.style.display === 'block') apRender(); }
+function renderAll(){ renderDashboard(); renderHistory(); if(els.payablesView && els.payablesView.style.display === 'block') apRender(); if(els.healthView && els.healthView.style.display === 'block') dhRender(); else if(els.healthView) dhUpdateBadge(); }
 
 // ---------- product detail modal ----------
 function openDetail(key, entry){
@@ -4602,6 +4627,155 @@ els.payablesView = document.getElementById('payablesView');
 TAB_VIEWS.push({ btn: 'tabPayablesBtn', view: 'payablesView' });
 els.tabPayablesBtn.addEventListener('click', ()=> switchTab('tabPayablesBtn', apRender));
 /* ==== PAYABLES JS END ==== */
+/* ==== DATA HEALTH JS START ==== */
+// فحص البيانات: يطلّع كل المشاكل اللي بتبوّظ الأرقام، وكل مشكلة جنبها زرار تصليحها
+const dh = { dismissed: new Set(), open: new Set(['dupInv','dupSup','dates','outliers']) };
+try{ JSON.parse(localStorage.getItem('dhDismissed')||'[]').forEach(k=> dh.dismissed.add(k)); }catch(_){}
+function dhSaveDismissed(){ try{ localStorage.setItem('dhDismissed', JSON.stringify([...dh.dismissed])); }catch(_){} }
+function dhInvTotal(inv){ return apInvoiceTotal(inv); }
+function dhInvLabel(inv){ return `${inv.store || 'بدون مورد'} · ${inv.invoiceNumber ? '#' + inv.invoiceNumber : 'بدون رقم'} · ${inv.date || 'بدون تاريخ'} · ${apFmt(dhInvTotal(inv))}`; }
+
+function dhChecks(){
+  const today = apToday();
+  const daysAgo = (d)=> Math.round((new Date(today+'T00:00:00') - new Date(d+'T00:00:00')) / 86400000);
+  const out = {};
+
+  // 1) فواتير مكررة: نفس الرقم (لأي مورد)، أو نفس المورد + التاريخ + الإجمالي
+  const byNo = new Map();
+  invoices.forEach(inv=>{ if(!inv.invoiceNumber) return; const k = normalizeInvoiceNumber(inv.invoiceNumber); if(k.length < 3) return; if(!byNo.has(k)) byNo.set(k, []); byNo.get(k).push(inv); });
+  const dupGroups = [];
+  byNo.forEach((list, k)=>{
+    if(list.length < 2) return;
+    // نفس الرقم عند موردين مختلفين بإجماليات مختلفة غالبًا صدفة — نعرضه بس لو الإجمالي متقارب أو نفس المورد
+    const sameStore = new Set(list.map(i=> i.store)).size === 1;
+    const totals = list.map(dhInvTotal);
+    const close = Math.max(...totals) - Math.min(...totals) <= Math.max(1, Math.max(...totals) * 0.02);
+    if(sameStore || close) dupGroups.push({ key: 'no:' + k, list, why: sameStore ? 'نفس رقم الفاتورة لنفس المورد' : 'نفس رقم الفاتورة ونفس الإجمالي عند موردين بأسماء مختلفة' });
+  });
+  const seen = new Set(dupGroups.flatMap(g=> g.list.map(i=> i.id)));
+  const bySig = new Map();
+  invoices.forEach(inv=>{ if(seen.has(inv.id) || !inv.date) return; const k = inv.store + '|' + inv.date + '|' + apR(dhInvTotal(inv)); if(!bySig.has(k)) bySig.set(k, []); bySig.get(k).push(inv); });
+  bySig.forEach((list, k)=>{ if(list.length > 1) dupGroups.push({ key: 'sig:' + k, list, why: 'نفس المورد ونفس التاريخ ونفس الإجمالي' }); });
+  out.dupInv = dupGroups.filter(g=> !dh.dismissed.has(g.key));
+
+  // 2) موردين بأكتر من اسم
+  const counts = new Map(); invoices.forEach(inv=> { if(inv.store) counts.set(inv.store, (counts.get(inv.store)||0) + 1); });
+  out.dupSup = findSupplierDuplicateGroups(counts);
+
+  // 3) تواريخ مشكوك فيها
+  out.dates = invoices.filter(inv=>{
+    if(dh.dismissed.has('date:' + inv.id)) return false;
+    if(!inv.date) return true;
+    const d = daysAgo(inv.date);
+    return d < -2 || d > 365;
+  }).map(inv=> ({ inv, why: !inv.date ? 'من غير تاريخ' : (daysAgo(inv.date) < 0 ? 'تاريخ في المستقبل' : 'أقدم من سنة') }));
+
+  // 4) سعر وحدة شاذ (غالبًا الكمية أو السعر اتقرا غلط — زي كمية 1 بدل 800)
+  const itemInv = new Map(); invoices.forEach(inv=> (inv.items||[]).forEach(it=> itemInv.set(it.id, inv)));
+  const outliers = [];
+  getProductSeries().forEach((entry)=>{
+    const pts = entry.points.filter(p=> p.unitPrice > 0);
+    if(pts.length < 3) return;
+    const sorted = pts.map(p=> p.unitPrice).sort((a,b)=> a-b);
+    const med = sorted[Math.floor(sorted.length/2)];
+    pts.forEach(p=>{
+      const ratio = p.unitPrice / med;
+      if((ratio >= 4 || ratio <= 0.25) && !dh.dismissed.has('out:' + p.id)){
+        const inv = itemInv.get(p.id);
+        if(inv) outliers.push({ inv, p, med, ratio, name: entry.displayName });
+      }
+    });
+  });
+  out.outliers = outliers.sort((a,b)=> Math.max(b.ratio, 1/b.ratio) - Math.max(a.ratio, 1/a.ratio));
+
+  // 5) فواتير من غير رقم
+  out.noNumber = invoices.filter(inv=> !inv.invoiceNumber && !dh.dismissed.has('nonum:' + inv.id));
+
+  // 6) فواتير فاضية أو إجماليها صفر
+  out.empty = invoices.filter(inv=> !(inv.items||[]).length || dhInvTotal(inv) <= 0);
+
+  // 7) فواتير من غير مورد
+  out.noStore = invoices.filter(inv=> !inv.store);
+
+  // 8) موردين من غير شروط دفع، أو آجل من غير مدة
+  const sups = [...counts.keys()];
+  out.terms = sups.filter(s=>{ const p = supplierPaymentMap.get(s); return !p || (p.type === 'credit' && (p.creditDays === null || p.creditDays === undefined)); })
+    .map(s=> ({ name: s, count: counts.get(s), why: supplierPaymentMap.get(s) ? 'آجل من غير مدة سداد' : 'نوع الدفع مش متحدد' }));
+  return out;
+}
+function dhCount(c){ return c.dupInv.length + c.dupSup.length + c.dates.length + c.outliers.length + c.noNumber.length + c.empty.length + c.noStore.length + c.terms.length; }
+function dhUpdateBadge(){
+  const b = document.getElementById('tabHealthBtn'); if(!b) return;
+  const n = invoices.length ? dhCount(dhChecks()) : 0;
+  b.innerHTML = 'فحص البيانات' + (n ? ` <span style="background:var(--brick);color:#fff;border-radius:999px;padding:0 7px;font-size:11px;margin-inline-start:4px;">${n}</span>` : ' ✓');
+}
+function dhRender(){
+  const root = document.getElementById('dhRoot'); if(!root) return;
+  const c = dhChecks();
+  const total = dhCount(c);
+  const isOwner = currentWorkspace && currentWorkspace.role === 'owner';
+  const act = (html)=> isOwner ? html : '';
+  const sec = (key, title, desc, n, body, sev)=> `
+    <div class="dh-sec ${n ? '' : 'done'}" data-sec="${key}">
+      <button class="dh-head" data-toggle="${key}">
+        <span class="dh-n ${n ? sev : 'ok'}">${n || '✓'}</span>
+        <span class="dh-t"><b>${title}</b><small>${desc}</small></span>
+        <span class="dh-arrow">${n ? (dh.open.has(key) ? '▾' : '◂') : ''}</span>
+      </button>
+      ${n && dh.open.has(key) ? `<div class="dh-body">${body}</div>` : ''}
+    </div>`;
+  const invRow = (inv, extra='', actions='')=> `<div class="dh-row"><div class="dh-main"><span dir="auto">${escapeHtml(dhInvLabel(inv))}</span>${extra ? `<small>${extra}</small>` : ''}</div><div class="dh-acts">${act(`<button class="ap-btn" data-edit="${escapeHtml(String(inv.id))}">فتح وتعديل</button>`)}${actions}</div></div>`;
+
+  root.innerHTML = `
+    <div class="ap-head"><h3>فحص البيانات</h3><span class="ap-terms">${total ? `${total} مشكلة محتاجة تتصلح عشان الأرقام تبقى موثوقة` : 'البيانات نضيفة ✓'}</span></div>
+    ${!isOwner ? `<div class="ap-banner">انت بتشوف بس — التصليح لصاحب الحساب.</div>` : ''}
+    ${sec('dupInv','فواتير مكررة','نفس الفاتورة متسجلة أكتر من مرة — بتزوّد المشتريات والمديونية', c.dupInv.length, c.dupInv.map(g=> `
+      <div class="dh-group"><div class="dh-why">${escapeHtml(g.why)}</div>
+        ${g.list.map(inv=> invRow(inv, `${(inv.items||[]).length} صنف`, act(`<button class="ap-btn danger" data-del="${escapeHtml(String(inv.id))}">امسح دي</button>`))).join('')}
+        ${act(`<button class="ap-link" data-dismiss="${escapeHtml(g.key)}">مش مكررة — سيبهم</button>`)}
+      </div>`).join(''), 'err')}
+    ${sec('dupSup','مورد مكتوب بأكتر من اسم','فواتيره وأرصدته متقسمة على كذا اسم', c.dupSup.length, `
+      ${c.dupSup.map(g=> `<div class="dh-row"><div class="dh-main">${g.map(n=> `<span dir="auto">${escapeHtml(n)}</span>`).join('<br>')}</div></div>`).join('')}
+      ${act(`<button class="ap-btn primary" data-open="merge">افتح دمج الموردين</button>`)}`, 'err')}
+    ${sec('outliers','سعر وحدة غريب','سعر الوحدة بعيد جدًا عن العادي لنفس الصنف — غالبًا الكمية أو السعر اتقرا غلط', c.outliers.length, c.outliers.slice(0,100).map(o=> invRow(o.inv,
+      `<span dir="auto">${escapeHtml(o.name)}</span>: ${apFmt(o.p.price)} ÷ ${o.p.qty} = <b>${fmtPrice(o.p.unitPrice)}</b> للوحدة، والعادي حوالي <b>${fmtPrice(o.med)}</b> (${o.ratio >= 1 ? 'أغلى ' + Math.round(o.ratio) + ' مرات' : 'أرخص ' + Math.round(1/o.ratio) + ' مرات'})`,
+      act(`<button class="ap-link" data-dismiss="out:${escapeHtml(String(o.p.id))}">سليم</button>`))).join(''), 'err')}
+    ${sec('dates','تواريخ مشكوك فيها','تاريخ ناقص أو في المستقبل أو أقدم من سنة — غالبًا اتقرا غلط', c.dates.length, c.dates.map(d=> invRow(d.inv, escapeHtml(d.why), act(`<button class="ap-link" data-dismiss="date:${escapeHtml(String(d.inv.id))}">التاريخ صح</button>`))).join(''), 'err')}
+    ${sec('empty','فواتير فاضية أو إجماليها صفر','', c.empty.length, c.empty.map(inv=> invRow(inv, '', act(`<button class="ap-btn danger" data-del="${escapeHtml(String(inv.id))}">امسحها</button>`))).join(''), 'err')}
+    ${sec('noStore','فواتير من غير مورد','', c.noStore.length, c.noStore.map(inv=> invRow(inv)).join(''), 'err')}
+    ${sec('terms','موردين من غير شروط دفع','من غيرها ميعاد الاستحقاق والمديونية مش هيتحسبوا صح', c.terms.length, `
+      ${c.terms.map(t=> `<div class="dh-row"><div class="dh-main"><span dir="auto">${escapeHtml(t.name)}</span><small>${escapeHtml(t.why)} · ${t.count} فاتورة</small></div></div>`).join('')}
+      ${act(`<button class="ap-btn primary" data-open="terms">افتح إعدادات الموردين</button>`)}`, 'warn')}
+    ${sec('noNumber','فواتير من غير رقم','البرنامج مش هيقدر يمنع تكرارها أو يطابقها مع كشف الحساب', c.noNumber.length, c.noNumber.map(inv=> invRow(inv, '', act(`<button class="ap-link" data-dismiss="nonum:${escapeHtml(String(inv.id))}">مالهاش رقم فعلًا</button>`))).join(''), 'warn')}
+    ${dh.dismissed.size ? `<div style="margin-top:10px;"><button class="ap-link" data-reset="1">رجّع كل اللي اتعلّم عليه "سليم" (${dh.dismissed.size})</button></div>` : ''}`;
+  dhUpdateBadge();
+}
+(function dhWire(){
+  const root = document.getElementById('dhRoot');
+  root.addEventListener('click', async (e)=>{
+    const t = e.target.closest('[data-toggle],[data-edit],[data-del],[data-dismiss],[data-open],[data-reset]'); if(!t) return;
+    if(t.dataset.toggle){ const k = t.dataset.toggle; dh.open.has(k) ? dh.open.delete(k) : dh.open.add(k); return dhRender(); }
+    if(t.dataset.edit) return openEditInvoice(t.dataset.edit);
+    if(t.dataset.dismiss){ dh.dismissed.add(t.dataset.dismiss); dhSaveDismissed(); return dhRender(); }
+    if(t.dataset.reset){ dh.dismissed.clear(); dhSaveDismissed(); return dhRender(); }
+    if(t.dataset.open === 'merge') return openSupplierMergeModal();
+    if(t.dataset.open === 'terms') return openSupplierDestModal();
+    if(t.dataset.del){
+      const inv = invoices.find(i=> String(i.id) === t.dataset.del); if(!inv) return;
+      if(!confirm(`مسح الفاتورة دي نهائيًا؟\n${dhInvLabel(inv)}`)) return;
+      t.disabled = true;
+      await deleteInvoiceRemote(inv.id);
+      await refreshInvoicesFromServer();
+      renderAll(); dhRender();
+    }
+  });
+})();
+els.tabHealthBtn = document.getElementById('tabHealthBtn');
+els.healthView = document.getElementById('healthView');
+TAB_VIEWS.push({ btn: 'tabHealthBtn', view: 'healthView' });
+els.tabHealthBtn.addEventListener('click', ()=> switchTab('tabHealthBtn', dhRender));
+/* ==== DATA HEALTH JS END ==== */
+
 
 
 // ---------- init ----------
