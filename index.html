@@ -3503,6 +3503,7 @@ function ixCleanItems(items){
     qty: ixNum(it.qty) || 1,
     unit: (it.unit||'').toString().trim(),
     price: ixNum(it.price),
+    printedUP: ixNum(it.unitPrice),
     destination: ''
   })).filter(it=> it.name && it.price !== null && it.price !== 0);
 }
@@ -3597,7 +3598,7 @@ function ixCheck(v){
   else if(p.total !== null && p.total !== undefined){ target = p.total; mine = sum + vat; label = 'بعد الضريبة'; }
   if(target === null) return { state:'none', sum, vat };
   const diff = mine - target;
-  const ok = Math.abs(diff) <= Math.max(1, Math.abs(target) * 0.005);
+  const ok = Math.abs(diff) <= 1; // فرق التقريب بس (درهم واحد) — أي فرق أكبر لازم يتراجع
   return { state: ok ? 'ok' : 'err', sum, vat, target, mine, diff, label };
 }
 function ixDupInDb(v){
@@ -3616,6 +3617,9 @@ function ixIssues(v){
   const valid = ixValidItems(v);
   if(!valid.length) errs.push(v.readError ? v.readError + ' — اكتب الأصناف من الصورة أو اضغط "اقرأ تاني"' : 'مفيش أصناف بسعر');
   else if(v.readError && /ما اتقراتش/.test(v.readError)) infos.push(v.readError);
+  ixLineProblems(v).forEach(lp=> errs.push({ html: `سطر "${escapeHtml(lp.it.name)}": الكمية ${ixFmt(lp.qty)} × سعر الوحدة ${ixFmt(lp.up)} = <b>${ixFmt(lp.expected)}</b> مش ${ixFmt(lp.price)}. <a href="#" data-act="fixline" data-i="${lp.i}">صحّح لـ ${ixFmt(lp.expected)}</a>` }));
+  const dp = ixDateProblem(v.date);
+  if(dp && dp.level === 'err') errs.push(dp.msg);
   const partial = v.items.filter(it=> (it.name||'').trim() && ixNum(it.price) === null).length;
   if(partial) errs.push(`${partial} سطر من غير سعر`);
   if(!(v.store||'').trim() && valid.length) errs.push('اسم المورد ناقص');
@@ -3629,7 +3633,7 @@ function ixIssues(v){
   else {
   if(c.state === 'none') warns.push('مفيش إجمالي مطبوع اتقرا للمقارنة — راجع الأصناف بنفسك');
   if(!v.date) warns.push('التاريخ ناقص');
-  else if(v.date > ixToday()) warns.push('التاريخ في المستقبل — اتأكد منه');
+  else if(dp && dp.level === 'warn') warns.push(dp.msg);
   if(!v.invoiceNumber) warns.push('رقم الفاتورة ناقص (من غيره البرنامج مش هيعرف يمنع التكرار)');
   if(v.store && !ixKnownSuppliers().includes(v.store)) warns.push('مورد جديد — أول مرة يتسجل. لو هو موجود باسم تاني اختاره من القايمة');
   }
@@ -3637,6 +3641,26 @@ function ixIssues(v){
   if(v.saved) status = 'saved';
   else if(v.skipped) status = 'skipped';
   return { errs, warns, infos, status, check: c };
+}
+function ixLineProblems(v){
+  const out = [];
+  v.items.forEach((it,i)=>{
+    const up = ixNum(it.printedUP), qty = ixNum(it.qty), price = ixNum(it.price);
+    if(up === null || qty === null || price === null || !(it.name||'').trim()) return;
+    const expected = Math.round(qty * up * 100) / 100;
+    if(Math.abs(expected - price) > Math.max(0.05, Math.abs(expected) * 0.005)) out.push({ i, it, up, qty, price, expected });
+  });
+  return out;
+}
+function ixDateProblem(d){
+  if(!d) return null;
+  const today = ixToday();
+  const days = Math.round((new Date(today+'T00:00:00') - new Date(d+'T00:00:00')) / 86400000);
+  if(isNaN(days)) return { level:'err', msg:'التاريخ مش مفهوم — اكتبه من الصورة' };
+  if(days < -2) return { level:'err', msg:`التاريخ ${d} في المستقبل — غالبًا اتقرا غلط (اليوم والشهر متبدلين؟). قارنه بالصورة` };
+  if(days > 180) return { level:'err', msg:`التاريخ ${d} قديم جدًا — غالبًا اتقرا غلط. قارنه بالصورة (التاريخ بيتكتب يوم.شهر.سنة)` };
+  if(days > 60) return { level:'warn', msg:`التاريخ ${d} من أكتر من شهرين — اتأكد إنه صح` };
+  return null;
 }
 function ixSavable(v){
   if(v.saved || v.skipped) return false;
@@ -3730,7 +3754,7 @@ function ixRenderMain(){
   const ro = v.saved ? 'disabled' : '';
   const rows = v.items.map((it,i)=>{
     const price = ixNum(it.price), qty = ixNum(it.qty) || 1;
-    const bad = (it.name||'').trim() && price === null;
+    const bad = ((it.name||'').trim() && price === null) || ixLineProblems(v).some(lp=> lp.i === i);
     return `<tr>
       <td><input dir="auto" data-i="${i}" data-k="name" value="${escapeHtml(it.name||'')}" list="existingProducts" placeholder="اسم الصنف" ${ro} title="${escapeHtml(it.barcode ? 'باركود: '+it.barcode : '')}"></td>
       <td><input class="num" data-i="${i}" data-k="qty" value="${it.qty ?? ''}" ${ro}></td>
@@ -3773,7 +3797,7 @@ function ixRenderMain(){
 }
 function ixIssuesHtml(iss, v){
   const out = [];
-  iss.errs.forEach(e=> out.push(`<div class="ix-issue err">✕ ${escapeHtml(e)}</div>`));
+  iss.errs.forEach(e=> out.push(`<div class="ix-issue err">✕ ${typeof e === 'string' ? escapeHtml(e) : e.html}</div>`));
   iss.warns.forEach(e=> out.push(`<div class="ix-issue warn">! ${escapeHtml(e)}</div>`));
   iss.infos.forEach(e=> out.push(`<div class="ix-issue info">${escapeHtml(e)}</div>`));
   if(!v.saved && !v.skipped && !iss.errs.length && iss.check.state === 'ok') out.unshift(`<div class="ix-issue ok">✓ مجموع الأصناف مطابق للإجمالي المطبوع في الفاتورة</div>`);
@@ -3813,7 +3837,7 @@ function ixRefreshComputed(){
     const price = ixNum(it.price), qty = ixNum(it.qty) || 1;
     if(el) el.textContent = price === null ? '—' : ixFmt(price/qty);
     const pin = ixEl('ixMain').querySelector(`input[data-i="${i}"][data-k="price"]`);
-    if(pin) pin.classList.toggle('bad', !!(it.name||'').trim() && price === null);
+    if(pin) pin.classList.toggle('bad', (!!(it.name||'').trim() && price === null) || ixLineProblems(v).some(lp=> lp.i === i));
   });
   ixRenderSide(); ixRenderTop();
 }
@@ -3948,7 +3972,7 @@ ixMain.addEventListener('input', (e)=>{
   const v = ixCurInv(); if(!v || v.saved) return;
   const t = e.target;
   if(t.dataset.f){ v[t.dataset.f] = t.value; if(t.dataset.f === 'store') v.storeOriginal = ''; }
-  else if(t.dataset.k){ const it = v.items[Number(t.dataset.i)]; if(it) it[t.dataset.k] = t.value; }
+  else if(t.dataset.k){ const it = v.items[Number(t.dataset.i)]; if(it){ it[t.dataset.k] = t.value; if(t.dataset.k === 'qty' || t.dataset.k === 'price') it.printedUP = null; } }
   else return;
   ixRefreshComputed();
 });
@@ -3982,6 +4006,10 @@ ixMain.addEventListener('click', async (e)=>{
   const act = t.dataset.act;
   if(act === 'next') ixNext();
   else if(act === 'addrow'){ v.items.push(ixEmptyItem()); ixRenderMain(); const ins = ixMain.querySelectorAll('input[data-k="name"]'); if(ins.length) ins[ins.length-1].focus(); }
+  else if(act === 'fixline'){
+    const lp = ixLineProblems(v).find(x=> x.i === Number(t.dataset.i));
+    if(lp){ v.items[lp.i].price = lp.expected; ixRenderMain(); ixRefreshComputed(); }
+  }
   else if(act === 'approve'){ v.approved = true; ixRefreshComputed(); }
   else if(act === 'unapprove'){ v.approved = false; ixRefreshComputed(); }
   else if(act === 'skip'){ v.skipped = true; ixRefreshComputed(); ixNext(); }
@@ -4110,7 +4138,7 @@ function apRender(){
     <div class="ap-head">
       <h3>المديونية للموردين</h3>
       <label class="ap-asof">الأرصدة في تاريخ <input type="date" id="apAsOf" value="${ap.asOf}"></label>
-      <button class="ap-btn" id="apExportAging">تصدير Excel</button>
+      <button class="ap-btn" id="apExportAging" title="أرصدة كل الموردين في التاريخ المختار + حركة الشهر">تصدير الأرصدة Excel</button>
       <button class="ap-btn primary owner-only" data-ap="pay">+ تسجيل دفعة</button>
     </div>
     <div class="ap-kpis">
@@ -4326,10 +4354,38 @@ function apExportAging(){
   const open = [];
   sups.forEach(s=> s.invoices.filter(r=> r.open > 0.004).forEach(r=> open.push({ 'المورد': s.name, 'رقم الفاتورة': r.inv.invoiceNumber || '', 'تاريخ الفاتورة': r.inv.date || '', 'تاريخ الاستحقاق': r.due || '', 'أيام التأخير': Math.max(0, r.daysOver), 'قيمة الفاتورة': r.total, 'المدفوع': apR(r.paid), 'المتبقي': r.open })));
   const pays = apPayments.filter(p=> p.date <= ap.asOf).map(p=> ({ 'التاريخ': p.date, 'المورد': p.supplier, 'المبلغ': p.amount, 'الطريقة': AP_METHODS[p.method] || '', 'المرجع': p.reference, 'ملاحظة': p.note, 'موزع على فواتير': apR(p.allocs.reduce((t,a)=> t + a.amount, 0)) }));
+  // حركة أرصدة الشهر: رصيد أول الشهر + مشتريات آجل − مدفوعات = رصيد آخر الفترة
+  const mStart = ap.asOf.slice(0,7) + '-01';
+  const dPrev = new Date(mStart + 'T00:00:00'); dPrev.setDate(dPrev.getDate() - 1);
+  const prevDay = dPrev.toISOString().slice(0,10);
+  const before = apCompute(prevDay), after = apCompute(ap.asOf);
+  const names = new Set([...before.keys(), ...after.keys()]);
+  const move = [];
+  names.forEach(n=>{
+    const o = before.get(n), c = after.get(n);
+    const opening = o ? o.balance : 0, closing = c ? c.balance : 0;
+    const purchases = c ? c.invoices.filter(r=> (r.inv.date||'') >= mStart).reduce((t,r)=> t + r.total, 0) : 0;
+    const paid = apPayments.filter(p=> p.supplier === n && p.date >= mStart && p.date <= ap.asOf).reduce((t,p)=> t + p.amount, 0);
+    const ob = apOpening.get(n); const obIn = ob && ob.asOf >= mStart && ob.asOf <= ap.asOf ? ob.amount : 0;
+    if(Math.abs(opening) < 0.005 && Math.abs(closing) < 0.005 && purchases < 0.005 && paid < 0.005) return;
+    const row = { 'المورد': n, 'رصيد أول الشهر': apR(opening), 'مشتريات آجل خلال الفترة': apR(purchases), 'مدفوعات خلال الفترة': apR(paid) };
+    if(obIn) row['رصيد افتتاحي مسجل خلال الفترة'] = apR(obIn);
+    row['رصيد آخر الفترة'] = apR(closing);
+    move.push(row);
+  });
+  move.sort((x,y)=> y['رصيد آخر الفترة'] - x['رصيد آخر الفترة']);
+  if(move.length){
+    const sum = (k)=> apR(move.reduce((t,r)=> t + (r[k]||0), 0));
+    const tot = { 'المورد': 'الإجمالي', 'رصيد أول الشهر': sum('رصيد أول الشهر'), 'مشتريات آجل خلال الفترة': sum('مشتريات آجل خلال الفترة'), 'مدفوعات خلال الفترة': sum('مدفوعات خلال الفترة') };
+    if(move.some(r=> r['رصيد افتتاحي مسجل خلال الفترة'])) tot['رصيد افتتاحي مسجل خلال الفترة'] = sum('رصيد افتتاحي مسجل خلال الفترة');
+    tot['رصيد آخر الفترة'] = sum('رصيد آخر الفترة');
+    move.push(tot);
+  }
   const wb = XLSX.utils.book_new();
-  const add = (rows, name)=>{ const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '': 'لا توجد بيانات' }]); ws['!views'] = [{ RTL: true }]; XLSX.utils.book_append_sheet(wb, ws, name); };
+  const add = (rows, name)=>{ const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '': 'لا توجد بيانات' }]); ws['!views'] = [{ RTL: true }]; ws['!cols'] = Object.keys(rows[0]||{a:1}).map((k,i)=> ({ wch: i===0 ? 42 : 20 })); XLSX.utils.book_append_sheet(wb, ws, name); };
+  add(move, 'أرصدة الشهر');
   add(aging, 'أعمار الديون'); add(open, 'الفواتير المفتوحة'); add(pays, 'المدفوعات');
-  XLSX.writeFile(wb, `مديونية-الموردين-${ap.asOf}.xlsx`);
+  XLSX.writeFile(wb, `أرصدة-الموردين-${ap.asOf}.xlsx`);
 }
 function apExportLedger(){
   const s = apCompute(ap.asOf).get(ap.supplier); if(!s) return;
