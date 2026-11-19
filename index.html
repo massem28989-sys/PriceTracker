@@ -43,7 +43,7 @@ header{
   padding:28px 24px 24px;
   border-bottom:3px solid var(--ink);
 }
-header .wrap{max-width:920px;margin:0 auto;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;}
+header .wrap{max-width:1180px;margin:0 auto;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;}
 header h1{margin:0;font-size:26px;font-weight:700;letter-spacing:0;}
 header p{margin:6px 0 0;color:#C9DAD2;font-size:14px;}
 .btn{
@@ -63,7 +63,7 @@ header p{margin:6px 0 0;color:#C9DAD2;font-size:14px;}
 .btn-ghost:hover{background:var(--paper-raised);}
 .btn-danger-text{background:none;border:none;color:var(--brick);cursor:pointer;font-family:inherit;font-size:13px;}
 
-main{max-width:920px;margin:0 auto;padding:24px 24px 0;}
+main{max-width:1180px;margin:0 auto;padding:24px 24px 0;}
 
 .notice-banner{
   background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;
@@ -244,6 +244,192 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   header .wrap{flex-direction:column;align-items:flex-start;}
   .field-row{flex-direction:column;gap:8px;}
 }
+/* ==== INBOX CSS START ==== */
+.ix-screen{position:fixed;inset:0;z-index:200;background:var(--paper);display:none;flex-direction:column;color:var(--ink);}
+.ix-screen.show{display:flex;}
+.ix-top{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--pine-deep);color:var(--white);flex-wrap:wrap;}
+.ix-top h2{margin:0;font-size:17px;font-weight:700;white-space:nowrap;}
+.ix-counts{display:flex;gap:6px;flex-wrap:wrap;flex:1;}
+.ix-chip{font-size:12px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.12);white-space:nowrap;}
+.ix-chip b{font-family:'JetBrains Mono',monospace;margin-inline-start:4px;}
+.ix-top-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.ix-btn{border:none;cursor:pointer;font-family:inherit;font-weight:600;font-size:13px;padding:8px 14px;border-radius:4px;}
+.ix-btn:disabled{opacity:.5;cursor:default;}
+.ix-btn-ghost{background:rgba(255,255,255,.12);color:var(--white);}
+.ix-btn-ghost:hover{background:rgba(255,255,255,.2);}
+.ix-btn-save{background:var(--white);color:var(--pine-deep);}
+.ix-btn-close{background:transparent;color:#C9DAD2;}
+.ix-banner{display:none;background:#F6DCD4;color:#7A2A1B;padding:10px 16px;font-size:13px;border-bottom:1px solid #E4B7AA;}
+.ix-banner.show{display:block;}
+
+.ix-pick{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;gap:14px;}
+.ix-drop{width:100%;max-width:620px;border:2px dashed var(--line);border-radius:10px;background:var(--paper-raised);padding:48px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;}
+.ix-drop:hover,.ix-drop.over{border-color:var(--pine);background:var(--white);}
+.ix-drop-icon{font-size:34px;color:var(--pine);line-height:1;}
+.ix-drop-title{font-size:18px;font-weight:700;margin-top:10px;}
+.ix-drop-sub{font-size:13px;color:var(--ink-soft);margin-top:6px;line-height:1.7;}
+.ix-link{background:none;border:none;color:var(--pine-deep);font-family:inherit;font-size:14px;cursor:pointer;text-decoration:underline;}
+
+.ix-body{flex:1;display:none;min-height:0;}
+.ix-body.show{display:flex;}
+.ix-side{width:270px;flex-shrink:0;border-left:1px solid var(--line);background:var(--paper-raised);display:flex;flex-direction:column;min-height:0;}
+.ix-filters{display:flex;gap:4px;padding:10px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap;}
+.ix-filter{border:1px solid var(--line);background:var(--white);color:var(--ink-soft);font-family:inherit;font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;}
+.ix-filter.on{background:var(--pine-deep);color:var(--white);border-color:var(--pine-deep);}
+.ix-list{overflow:auto;flex:1;}
+.ix-item{display:flex;align-items:center;gap:10px;width:100%;text-align:right;background:none;border:none;border-bottom:1px solid var(--line-soft);padding:10px 12px;font-family:inherit;color:var(--ink);cursor:pointer;}
+.ix-item:hover{background:var(--white);}
+.ix-item.on{background:var(--white);box-shadow:inset -3px 0 0 var(--pine);}
+.ix-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--ink-soft);}
+.st-ok .ix-dot{background:#3E8A5C;}
+.st-warn .ix-dot{background:#C08A1E;}
+.st-err .ix-dot{background:var(--brick);}
+.st-approved .ix-dot{background:#3E8A5C;box-shadow:0 0 0 2px #C08A1E;}
+.st-saved .ix-dot{background:var(--steel);}
+.st-skipped{opacity:.45;}
+.st-skipped .ix-dot{background:var(--line);}
+.ix-item-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.ix-item-main b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ix-item-main small{font-size:11px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ix-item-amt{font-size:12px;color:var(--ink-soft);}
+.ix-pending{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line-soft);font-size:12px;color:var(--ink-soft);}
+.ix-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--pine);border-radius:50%;animation:ixspin .8s linear infinite;flex-shrink:0;}
+@keyframes ixspin{to{transform:rotate(360deg);}}
+
+.ix-main{flex:1;display:flex;min-width:0;min-height:0;}
+.ix-empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink-soft);font-size:15px;padding:24px;text-align:center;line-height:1.8;}
+.ix-viewer{flex:1 1 42%;min-width:0;display:flex;flex-direction:column;background:#D4CDBB;border-left:1px solid var(--line);}
+.ix-vtools{display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--paper-raised);border-bottom:1px solid var(--line);flex-wrap:wrap;}
+.ix-vtools button{border:1px solid var(--line);background:var(--white);font-family:inherit;font-size:12px;padding:4px 9px;border-radius:4px;cursor:pointer;color:var(--ink);}
+.ix-vtools button.on{background:var(--pine-deep);color:var(--white);border-color:var(--pine-deep);}
+.ix-sp{flex:1;}
+.ix-vimg{flex:1;overflow:auto;padding:10px;}
+.ix-vimg img{display:block;margin:0 auto;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.18);cursor:zoom-in;}
+.ix-vfoot{font-size:11px;color:var(--ink-soft);padding:5px 10px;background:var(--paper-raised);border-top:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ix-noimg{flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink-soft);font-size:13px;}
+
+.ix-form{flex:1 1 58%;min-width:0;overflow:auto;padding:16px 18px 40px;}
+.ix-issues{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;}
+.ix-issue{font-size:13px;padding:8px 12px;border-radius:5px;line-height:1.6;}
+.ix-issue.err{background:#F6DCD4;color:#7A2A1B;}
+.ix-issue.warn{background:#F7EBCB;color:#6B4B0C;}
+.ix-issue.ok{background:#DCEBDF;color:#24563A;}
+.ix-issue.info{background:#DDE6EE;color:#1F4361;}
+.ix-issue a{color:inherit;font-weight:600;}
+.ix-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px 12px;margin-bottom:14px;}
+.ix-grid .full{grid-column:1/-1;}
+.ix-field label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px;}
+.ix-field input,.ix-field select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--white);font-family:inherit;font-size:14px;color:var(--ink);}
+.ix-field input:focus,.ix-items input:focus{outline:2px solid var(--pine);outline-offset:-1px;}
+.ix-note{font-size:12px;color:var(--steel);margin-top:4px;line-height:1.6;}
+.ix-note a{color:inherit;}
+.ix-items{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;}
+.ix-items th{font-size:11px;font-weight:600;color:var(--ink-soft);text-align:right;padding:6px 4px;border-bottom:1px solid var(--line);}
+.ix-items td{padding:4px 3px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
+.ix-items input{width:100%;padding:6px 7px;border:1px solid transparent;border-radius:3px;background:transparent;font-family:inherit;font-size:13px;color:var(--ink);}
+.ix-items input:hover{border-color:var(--line);background:var(--white);}
+.ix-items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-align:left;}
+.ix-items input.bad{border-color:var(--brick);background:#FBEDE8;}
+.ix-up{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-soft);direction:ltr;text-align:left;white-space:nowrap;}
+.ix-rm{background:none;border:none;color:var(--ink-soft);font-size:18px;cursor:pointer;padding:0 6px;}
+.ix-rm:hover{color:var(--brick);}
+.ix-addrow{margin-top:8px;background:none;border:1px dashed var(--line);border-radius:4px;color:var(--pine-deep);font-family:inherit;font-size:13px;padding:6px 12px;cursor:pointer;}
+.ix-totals{margin-top:16px;border:1px solid var(--line);border-radius:6px;background:var(--white);overflow:hidden;}
+.ix-trow{display:flex;justify-content:space-between;gap:10px;padding:8px 14px;font-size:13px;border-bottom:1px solid var(--line-soft);}
+.ix-trow:last-child{border-bottom:none;}
+.ix-trow .mono{font-weight:600;}
+.ix-trow.grand{font-size:15px;font-weight:700;background:var(--paper-raised);}
+.ix-match{display:flex;align-items:center;gap:8px;padding:9px 14px;font-size:13px;font-weight:600;}
+.ix-match.ok{background:#DCEBDF;color:#24563A;}
+.ix-match.err{background:#F6DCD4;color:#7A2A1B;}
+.ix-match.none{background:var(--paper-raised);color:var(--ink-soft);font-weight:400;}
+.ix-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;align-items:center;}
+.ix-act{border:1px solid var(--line);background:var(--white);color:var(--ink);font-family:inherit;font-size:13px;font-weight:600;padding:9px 14px;border-radius:4px;cursor:pointer;}
+.ix-act.primary{background:var(--pine-deep);color:var(--white);border-color:var(--pine-deep);}
+.ix-act.warnbtn{border-color:#C08A1E;color:#6B4B0C;}
+.ix-act:disabled{opacity:.5;cursor:default;}
+.ix-saved-box{background:#DDE6EE;color:#1F4361;padding:10px 14px;border-radius:5px;font-size:13px;margin-bottom:14px;}
+.ix-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--white);padding:11px 18px;border-radius:6px;font-size:14px;opacity:0;pointer-events:none;transition:all .25s;z-index:210;max-width:90vw;text-align:center;}
+.ix-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.ix-mobile-sel{display:none;}
+
+@media (max-width:900px){
+  .ix-top{padding:8px 10px;gap:8px;}
+  .ix-top h2{font-size:15px;}
+  .ix-body.show{flex-direction:column;overflow:auto;}
+  .ix-side{width:auto;border-left:none;border-bottom:1px solid var(--line);max-height:34vh;}
+  .ix-main{flex-direction:column;}
+  .ix-viewer{border-left:none;border-bottom:1px solid var(--line);min-height:52vh;flex:none;}
+  .ix-form{overflow:visible;padding:14px 12px 40px;}
+  .ix-grid{grid-template-columns:1fr 1fr;}
+  .ix-items .col-dest,.ix-items .col-up{display:none;}
+  .ix-items col.col-dest,.ix-items col.col-up{width:0 !important;}
+}
+/* ==== INBOX CSS END ==== */
+/* ==== PAYABLES CSS START ==== */
+.ap-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 14px;}
+.ap-head h3{margin:0;font-size:18px;flex:1;min-width:160px;}
+.ap-asof{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);}
+.ap-asof input{padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--paper-raised);}
+.ap-btn{border:1px solid var(--line);background:var(--paper-raised);color:var(--ink);font-family:inherit;font-weight:600;font-size:13px;padding:8px 14px;border-radius:4px;cursor:pointer;}
+.ap-btn:hover{background:var(--white);}
+.ap-btn.primary{background:var(--pine-deep);border-color:var(--pine-deep);color:var(--white);}
+.ap-btn.danger{color:var(--brick);border-color:#E4B7AA;}
+.ap-btn:disabled{opacity:.5;cursor:default;}
+.ap-banner{background:#F7EBCB;color:#6B4B0C;border:1px solid #E7D29A;border-radius:5px;padding:12px 14px;font-size:13px;line-height:1.8;margin-bottom:14px;}
+.ap-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px;}
+.ap-kpi{background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;padding:12px 14px;}
+.ap-kpi .lbl{font-size:12px;color:var(--ink-soft);}
+.ap-kpi .val{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600;margin-top:4px;direction:ltr;text-align:right;}
+.ap-kpi .sub{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+.ap-kpi.bad .val{color:var(--brick);}
+.ap-sec{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:18px 0 8px;flex-wrap:wrap;}
+.ap-sec h4{margin:0;font-size:15px;}
+.ap-sec .hint2{font-size:12px;color:var(--ink-soft);}
+.ap-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--paper-raised);}
+.ap-table{width:100%;border-collapse:collapse;font-size:13px;min-width:760px;}
+.ap-table th{font-size:11px;font-weight:600;color:var(--ink-soft);text-align:right;padding:9px 8px;border-bottom:1px solid var(--line);background:var(--paper);white-space:nowrap;}
+.ap-table td{padding:9px 8px;border-bottom:1px solid var(--line-soft);white-space:nowrap;}
+.ap-table td.n,.ap-table th.n{text-align:left;font-family:'JetBrains Mono',monospace;direction:ltr;}
+.ap-table th.n{font-family:inherit;}
+.ap-table tbody tr.click{cursor:pointer;}
+.ap-table tbody tr.click:hover{background:var(--white);}
+.ap-table tfoot td{font-weight:700;border-top:2px solid var(--ink);border-bottom:none;background:var(--paper);}
+.ap-table .zero{color:var(--line);}
+.ap-table .over{color:var(--brick);font-weight:600;}
+.ap-table .sup{max-width:260px;overflow:hidden;text-overflow:ellipsis;font-weight:600;}
+.ap-pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;}
+.ap-pill.over{background:#F6DCD4;color:#7A2A1B;}
+.ap-pill.soon{background:#F7EBCB;color:#6B4B0C;}
+.ap-pill.ok{background:#DCEBDF;color:#24563A;}
+.ap-pill.part{background:#DDE6EE;color:#1F4361;}
+.ap-pill.paid{background:var(--paper);color:var(--ink-soft);}
+.ap-empty{padding:26px;text-align:center;color:var(--ink-soft);font-size:13px;}
+.ap-back{background:none;border:none;color:var(--pine-deep);font-family:inherit;font-size:13px;cursor:pointer;padding:0;margin-bottom:6px;}
+.ap-terms{font-size:12px;color:var(--ink-soft);}
+.ap-link{background:none;border:none;color:var(--pine-deep);font-family:inherit;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}
+.ap-link.danger{color:var(--brick);}
+/* payment modal */
+.ap-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-bottom:12px;}
+.ap-form-grid .full{grid-column:1/-1;}
+.ap-f label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px;}
+.ap-f input,.ap-f select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--white);font-family:inherit;font-size:14px;color:var(--ink);}
+.ap-f input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-align:left;}
+.ap-alloc{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:5px;}
+.ap-alloc table{width:100%;border-collapse:collapse;font-size:12px;}
+.ap-alloc th{position:sticky;top:0;background:var(--paper);font-weight:600;color:var(--ink-soft);text-align:right;padding:7px 8px;border-bottom:1px solid var(--line);}
+.ap-alloc td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
+.ap-alloc td.n{font-family:'JetBrains Mono',monospace;direction:ltr;text-align:left;}
+.ap-alloc input{width:100px;padding:5px 7px;border:1px solid var(--line);border-radius:3px;font-family:'JetBrains Mono',monospace;direction:ltr;text-align:left;}
+.ap-sum{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin:10px 0;padding:10px 12px;background:var(--paper-raised);border-radius:5px;}
+.ap-sum b{font-family:'JetBrains Mono',monospace;}
+.ap-err{color:var(--brick);font-size:13px;margin-top:8px;}
+@media (max-width:760px){
+  .ap-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .ap-kpi .val{font-size:16px;}
+  .ap-form-grid{grid-template-columns:1fr;}
+}
+/* ==== PAYABLES CSS END ==== */
 </style>
 </head>
 <body>
@@ -289,6 +475,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 
   <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
     <button class="btn btn-ghost tab-btn active" id="tabProductsBtn">المنتجات</button>
+    <button class="btn btn-ghost tab-btn" id="tabPayablesBtn">المديونية</button>
     <button class="btn btn-ghost tab-btn" id="tabHistoryBtn">سجل الفواتير</button>
     <button class="btn btn-ghost tab-btn" id="tabReportsBtn">التقارير الشهرية</button>
     <button class="btn btn-ghost tab-btn" id="tabSettlementBtn">تسوية الموردين</button>
@@ -314,6 +501,12 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   <datalist id="existingDestinations"></datalist>
   <div id="productList"></div>
   </div><!-- /productsView -->
+
+  <!-- ==== PAYABLES VIEW START ==== -->
+  <div id="payablesView" style="display:none;">
+    <div id="apRoot"></div>
+  </div>
+  <!-- ==== PAYABLES VIEW END ==== -->
 
   <div id="historyView" style="display:none;">
     <div class="section-title">
@@ -627,6 +820,86 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 </div>
 
 <datalist id="existingProducts"></datalist>
+
+<!-- ==== PAYABLES MODALS START ==== -->
+<div class="overlay" id="apPayOverlay">
+  <div class="modal" style="max-width:720px;">
+    <button class="modal-close" id="apPayClose">×</button>
+    <h2>تسجيل دفعة لمورد</h2>
+    <div class="ap-form-grid">
+      <div class="ap-f full"><label>المورد</label><select id="apPaySupplier"></select></div>
+      <div class="ap-f"><label>تاريخ الدفع</label><input type="date" id="apPayDate"></div>
+      <div class="ap-f"><label>المبلغ (شامل الضريبة)</label><input class="num" id="apPayAmount" inputmode="decimal" placeholder="0.00"></div>
+      <div class="ap-f"><label>طريقة الدفع</label><select id="apPayMethod">
+        <option value="bank_transfer">تحويل بنكي</option>
+        <option value="cheque">شيك</option>
+        <option value="cash">نقدي</option>
+        <option value="card">بطاقة</option>
+        <option value="other">أخرى</option>
+      </select></div>
+      <div class="ap-f"><label>رقم الشيك / مرجع التحويل</label><input id="apPayRef" placeholder="اختياري"></div>
+      <div class="ap-f full"><label>ملاحظة</label><input id="apPayNote" placeholder="اختياري"></div>
+    </div>
+    <div class="ap-sec" style="margin-top:4px;"><h4>الفواتير اللي الدفعة دي بتسددها</h4><button class="ap-link" id="apPayAuto">توزيع تلقائي (الأقدم استحقاقًا أولًا)</button></div>
+    <div class="ap-alloc" id="apPayAlloc"></div>
+    <div class="ap-sum" id="apPaySum"></div>
+    <div class="ap-err" id="apPayErr"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="apPaySave" style="background:var(--pine-deep);color:var(--white);">حفظ الدفعة</button>
+      <button class="btn btn-ghost" id="apPayCancel">إلغاء</button>
+    </div>
+  </div>
+</div>
+<div class="overlay" id="apOpenOverlay">
+  <div class="modal" style="max-width:440px;">
+    <button class="modal-close" id="apOpenClose">×</button>
+    <h2>الرصيد الافتتاحي</h2>
+    <p class="hint" id="apOpenHint"></p>
+    <div class="ap-form-grid">
+      <div class="ap-f"><label>المبلغ المستحق للمورد</label><input class="num" id="apOpenAmount" inputmode="decimal" placeholder="0.00"></div>
+      <div class="ap-f"><label>في تاريخ</label><input type="date" id="apOpenDate"></div>
+    </div>
+    <div class="ap-err" id="apOpenErr"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="apOpenSave" style="background:var(--pine-deep);color:var(--white);">حفظ</button>
+      <button class="btn btn-ghost" id="apOpenCancel">إلغاء</button>
+    </div>
+  </div>
+</div>
+<!-- ==== PAYABLES MODALS END ==== -->
+<!-- ==== INBOX HTML START ==== -->
+<div class="ix-screen" id="ixScreen">
+  <div class="ix-top">
+    <h2>إضافة ومراجعة الفواتير</h2>
+    <div class="ix-counts" id="ixCounts"></div>
+    <div class="ix-top-actions">
+      <button class="ix-btn ix-btn-ghost" id="ixMoreFilesBtn">+ ملفات</button>
+      <button class="ix-btn ix-btn-ghost" id="ixManualBtn">+ فاتورة يدوي</button>
+      <button class="ix-btn ix-btn-save" id="ixSaveBtn" disabled>حفظ</button>
+      <button class="ix-btn ix-btn-close" id="ixCloseBtn">إغلاق ✕</button>
+    </div>
+    <input type="file" id="ixFileInput" accept="image/*,application/pdf" multiple hidden>
+  </div>
+  <div class="ix-banner" id="ixBanner"></div>
+  <div class="ix-pick" id="ixPick">
+    <div class="ix-drop" id="ixDrop">
+      <div class="ix-drop-icon">⇪</div>
+      <div class="ix-drop-title">اسحب ملفات الفواتير هنا أو اضغط للاختيار</div>
+      <div class="ix-drop-sub">PDF أو صور، ملف واحد أو أكتر. الملف اللي فيه كذا فاتورة عادي،<br>والفاتورة اللي على صفحتين بتتجمع لوحدها.</div>
+    </div>
+    <button class="ix-link" id="ixManualBtn2">أو أدخل فاتورة يدويًا من غير ملف</button>
+  </div>
+  <div class="ix-body" id="ixReview">
+    <aside class="ix-side">
+      <div class="ix-filters" id="ixFilters"></div>
+      <div class="ix-list" id="ixList"></div>
+    </aside>
+    <section class="ix-main" id="ixMain"></section>
+  </div>
+  <div class="ix-toast" id="ixToast"></div>
+  <datalist id="ixSuppliers"></datalist>
+</div>
+<!-- ==== INBOX HTML END ==== -->
 
 <script>
 (async function(){
@@ -1154,6 +1427,7 @@ async function refreshInvoicesFromServer(){
       id: it.id, name: it.name, barcode: it.barcode || '', price: Number(it.price), qty: Number(it.qty) || 1, unit: it.unit || '', destination: it.destination || ''
     }))
   }));
+  await apLoad();
 }
 
 async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, paymentType){
@@ -1376,7 +1650,7 @@ function renderDashboard(){
       ${invoices.length===0 ? '<div><button class="btn btn-primary" id="emptyAddBtn">+ إضافة فواتير</button></div>' : ''}
     </div>`;
     const eb = document.getElementById('emptyAddBtn');
-    if(eb) eb.addEventListener('click', openAddModal);
+    if(eb) eb.addEventListener('click', ixOpen);
     return;
   }
 
@@ -2171,7 +2445,7 @@ els.historySortToggleBtn.addEventListener('click', ()=>{
   renderHistory();
 });
 
-function renderAll(){ renderDashboard(); renderHistory(); }
+function renderAll(){ renderDashboard(); renderHistory(); if(els.payablesView && els.payablesView.style.display === 'block') apRender(); }
 
 // ---------- product detail modal ----------
 function openDetail(key, entry){
@@ -2278,7 +2552,7 @@ function openAddModal(){
   els.addOverlay.classList.add('show');
 }
 function closeAddModal(){ cancelRequested = true; els.addOverlay.classList.remove('show'); }
-els.openAddBtn.addEventListener('click', openAddModal);
+els.openAddBtn.addEventListener('click', ixOpen);
 els.closeAddBtn.addEventListener('click', closeAddModal);
 els.cancelInvoiceBtn.addEventListener('click', closeAddModal);
 els.addOverlay.addEventListener('click', (e)=>{ if(e.target===els.addOverlay) closeAddModal(); });
@@ -3021,6 +3295,7 @@ els.startAnalysisBtn.addEventListener('click', async ()=>{
   updateProgress(done, total);
 
   let nextIndex = 0;
+  let continuationSkipped = 0;
   async function worker(){
     while(nextIndex < work.length){
       if(cancelRequested) return;
@@ -3034,7 +3309,27 @@ els.startAnalysisBtn.addEventListener('click', async ()=>{
       } else {
         try{
           const extracted = await extractInvoiceDataWithRetry(w.images);
-          if(!cancelRequested) appendDraftCard(extracted, w.label);
+          const validItems = (extracted.items||[]).filter(it => it.name && it.price !== '' && !isNaN(it.price));
+          if(!cancelRequested){
+            if(validItems.length === 0 && extracted.pageType === 'totals_only'){
+              // صفحة إجماليات/شروط فقط (تكملة لفاتورة من صفحتين) — مش فاتورة مستقلة
+              continuationSkipped++;
+            } else if(validItems.length === 0){
+              appendDraftCard(
+                {store: extracted.store, date: extracted.date, invoiceNumber: extracted.invoiceNumber, items:[{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}]},
+                `${w.label} — ⚠ ما اتقراتش تلقائيًا (الصفحة غير واضحة)، أدخل بياناتها يدويًا`
+              );
+            } else {
+              let label = w.label;
+              if(extracted.printedSubtotal){
+                const sum = validItems.reduce((s,it)=> s + it.price, 0);
+                if(Math.abs(sum - extracted.printedSubtotal) > Math.max(1, extracted.printedSubtotal * 0.005)){
+                  label += ` — ⚠ مجموع الأصناف ${sum.toFixed(2)} لا يساوي الإجمالي المطبوع ${extracted.printedSubtotal.toFixed(2)}: راجع الأرقام`;
+                }
+              }
+              appendDraftCard(extracted, label);
+            }
+          }
         }catch(e){
           console.error(e);
           if(!cancelRequested) appendDraftCard(
@@ -3053,7 +3348,8 @@ els.startAnalysisBtn.addEventListener('click', async ()=>{
   await Promise.all(Array.from({length: poolSize}, worker));
 
   if(!cancelRequested){
-    setStatus(`<div class="status-line" style="color:var(--pine-deep);">✓ تم تجهيز ${total} فاتورة. راجع البيانات قبل الحفظ.</div>`);
+    const invCount = total - continuationSkipped;
+    setStatus(`<div class="status-line" style="color:var(--pine-deep);">✓ تم تجهيز ${invCount} فاتورة${continuationSkipped ? ` (تم تخطي ${continuationSkipped} صفحة إجماليات/شروط بدون أصناف)` : ''}. راجع البيانات قبل الحفظ.</div>`);
   }
 });
 
@@ -3085,7 +3381,10 @@ async function extractInvoiceData(base64Images){
     throw new Error(data && data.error ? data.error : 'رد غير متوقع من الخادم');
   }
 
+  const num = (v)=> { const n = typeof v === 'number' ? v : parseFloat(v); return isNaN(n) ? null : n; };
   return {
+    pageType: data.pageType || '',
+    printedSubtotal: num(data.subtotal),
     store: data.store || '',
     date: data.date || new Date().toISOString().slice(0,10),
     invoiceNumber: data.invoiceNumber ? String(data.invoiceNumber).trim() : '',
@@ -3098,6 +3397,991 @@ async function extractInvoiceData(base64Images){
     }))
   };
 }
+
+/* ==== INBOX JS START ==== */
+// شاشة إضافة ومراجعة الفواتير: قراءة تلقائية + صورة الفاتورة جنب بياناتها + مطابقة الإجمالي + تجميع الصفحات
+const ix = { pages: [], invs: [], cur: null, filter: 'all', seq: 1, running: false, cancel: false,
+             groupedFiles: new Set(), zoom: 1, pageIdx: 0, lastError: '' };
+window.__ixDebug = ix;
+const ixEl = (id)=> document.getElementById(id);
+const ixNum = (v)=>{ if(v===null||v===undefined||v==='') return null; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g,'')); return isNaN(n) ? null : n; };
+const ixFmt = (n)=> (n===null||n===undefined||isNaN(n)) ? '—' : Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const ixToday = ()=> new Date().toISOString().slice(0,10);
+const ixEmptyItem = ()=> ({ name:'', barcode:'', qty:1, unit:'', price:'', destination:'' });
+
+// ---------- مطابقة اسم المورد بالموردين الموجودين ----------
+function ixSupKey(s){
+  return (s||'').toUpperCase()
+    .replace(/\(.*?\)/g,' ')
+    .replace(/\b(L\.?\s?L\.?\s?C\.?|LLC|CO\.?|COMPANY|TRADING|TR\.?|FOODSTUFFS?|FOOD\s?STUFF|GENERAL|SPS|SOLE|PROPRIETORSHIP|FZCO|FZE|FZ|EST\.?|ESTABLISHMENT|INDUSTRY|INDUSTRIES|THE|AND|&)\b/g,' ')
+    .replace(/[^A-Z0-9؀-ۿ]+/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+function ixKnownSuppliers(){ return [...new Set(invoices.map(i=> i.store).filter(Boolean))]; }
+function ixMatchSupplier(name){
+  const raw = (name||'').trim();
+  if(!raw) return null;
+  const list = ixKnownSuppliers();
+  if(list.includes(raw)) return raw;
+  const k = ixSupKey(raw);
+  if(!k) return null;
+  let best = null, bestScore = 0;
+  for(const ex of list){
+    const ek = ixSupKey(ex);
+    if(!ek) continue;
+    if(ek === k) return ex;
+    if(Math.min(ek.length,k.length) >= 5 && (ek.startsWith(k) || k.startsWith(ek))){ if(0.9 > bestScore){ best = ex; bestScore = 0.9; } continue; }
+    const maxLen = Math.max(ek.length, k.length);
+    const score = 1 - levenshtein(ek, k) / maxLen;
+    if(score > bestScore){ best = ex; bestScore = score; }
+  }
+  return bestScore >= 0.8 ? best : null;
+}
+function ixApplySupplier(v, fromUser){
+  const typed = (v.store||'').trim();
+  if(!fromUser){
+    const m = ixMatchSupplier(typed);
+    if(m && m !== typed){ v.storeOriginal = typed; v.store = m; }
+  } else {
+    v.storeOriginal = '';
+  }
+  const s = v.store;
+  if(supplierVatRatesMap.has(s)) v.vatRate = supplierVatRatesMap.get(s);
+  if(supplierPaymentMap.has(s) && (!v.paymentType || fromUser)) v.paymentType = supplierPaymentMap.get(s).type;
+  v.items.forEach(it=>{
+    if(!it.destination){
+      it.destination = destinationsMap.get(productKey(it)) || supplierDestinationsMap.get(s) || '';
+    }
+  });
+}
+
+// ---------- القراءة التلقائية ----------
+function ixFriendlyError(msg){
+  const m = String(msg||'');
+  if(/invalid x-api-key|authentication_error/i.test(m)) return 'مفتاح Anthropic غلط أو منتهي — غيّر ANTHROPIC_API_KEY من Supabase ← Edge Functions ← Secrets';
+  if(/credit balance|billing|insufficient/i.test(m)) return 'رصيد Anthropic مش كفاية — اشحن الرصيد من console.anthropic.com';
+  if(/ANTHROPIC_API_KEY غير مضبوط/.test(m)) return 'مفتاح Anthropic مش متضاف في Supabase Secrets';
+  if(/rate_limit|429|overloaded|529/i.test(m)) return 'خدمة القراءة مشغولة حاليًا — استنى دقيقة وجرّب "اقرأ تاني"';
+  return m;
+}
+async function ixExtract(images){
+  let result;
+  try{
+    result = await Promise.race([
+      sb.functions.invoke('extract-invoice', { body: { images } }),
+      new Promise((_, rej)=> setTimeout(()=> rej(new Error('TIMEOUT')), 90000))
+    ]);
+  }catch(e){
+    if(e && e.message === 'TIMEOUT') throw new Error('القراءة أخدت أكتر من دقيقة ونص');
+    throw new Error('فشل الاتصال بالخادم: ' + (e && e.message ? e.message : String(e)));
+  }
+  const { data, error } = result;
+  if(error){
+    let msg = error.message || 'خطأ غير معروف';
+    try{ if(error.context && typeof error.context.json === 'function'){ const b = await error.context.json(); if(b && b.error) msg = b.error; } }catch(_){}
+    throw new Error(msg);
+  }
+  if(!data || data.error) throw new Error(data && data.error ? data.error : 'رد غير متوقع من الخادم');
+  return data;
+}
+async function ixExtractRetry(images){
+  let last;
+  for(let a=0; a<3; a++){
+    try{ return await ixExtract(images); }
+    catch(e){
+      last = e;
+      if(/x-api-key|authentication|credit balance|غير مضبوط/i.test(e.message)) break; // مفيش فايدة من الإعادة
+      if(a < 2) await new Promise(r=> setTimeout(r, 2000 * (a+1)));
+    }
+  }
+  throw last;
+}
+function ixCleanItems(items){
+  return (items||[]).map(it=>({
+    name: (it.name||'').toString().trim(),
+    barcode: it.barcode ? String(it.barcode).trim() : '',
+    qty: ixNum(it.qty) || 1,
+    unit: (it.unit||'').toString().trim(),
+    price: ixNum(it.price),
+    destination: ''
+  })).filter(it=> it.name && it.price !== null && it.price !== 0);
+}
+function ixPrinted(r){ return { subtotal: ixNum(r.subtotal), vat: ixNum(r.vatAmount), total: ixNum(r.total) }; }
+function ixMergePrinted(v, p){
+  ['subtotal','vat','total'].forEach(k=>{ if(p[k] !== null && p[k] !== undefined) v.printed[k] = p[k]; });
+}
+function ixNewInv(o){
+  return Object.assign({ id: ix.seq++, fileId: 0, firstPage: 0, pageIds: [], store:'', storeOriginal:'', date:'', invoiceNumber:'',
+    paymentType:'', vatRate:5, items:[], printed:{subtotal:null,vat:null,total:null}, skipped:false, approved:false,
+    saved:false, saveError:'', readError:'', busy:false }, o);
+}
+
+// تجميع صفحات الملف الواحد في فواتير (صفحة إجماليات أو صفحة تكملة بنفس الرقم بتنضم للفاتورة اللي قبلها)
+function ixGroupFile(fileId){
+  if(ix.groupedFiles.has(fileId)) return;
+  ix.groupedFiles.add(fileId);
+  const pages = ix.pages.filter(p=> p.fileId === fileId).sort((a,b)=> a.pageNo - b.pageNo);
+  let last = null;
+  for(const p of pages){
+    if(p.status === 'error'){
+      ix.invs.push(ixNewInv({ fileId, firstPage: p.pageNo, pageIds:[p.id], items:[ixEmptyItem()], readError: 'ما اتقراتش تلقائيًا: ' + ixFriendlyError(p.error) }));
+      last = null; continue;
+    }
+    const r = p.result || {};
+    const items = ixCleanItems(r.items);
+    const printed = ixPrinted(r);
+    const sameNo = last && r.invoiceNumber && last.invoiceNumber && normalizeInvoiceNumber(r.invoiceNumber) === normalizeInvoiceNumber(last.invoiceNumber);
+    if(last && !items.length && (r.pageType === 'totals_only' || sameNo)){
+      last.pageIds.push(p.id); ixMergePrinted(last, printed); continue;
+    }
+    if(last && items.length && (sameNo || (!r.invoiceNumber && !r.store))){
+      last.pageIds.push(p.id); last.items.push(...items); ixMergePrinted(last, printed); ixApplySupplier(last, false); continue;
+    }
+    const v = ixNewInv({ fileId, firstPage: p.pageNo, pageIds:[p.id],
+      store: (r.store||'').toString().trim(), date: r.date || '', invoiceNumber: r.invoiceNumber ? String(r.invoiceNumber).trim() : '',
+      items: items.length ? items : [ixEmptyItem()], printed });
+    if(!items.length) v.readError = r.pageType === 'totals_only'
+      ? 'الصفحة دي فيها إجماليات بس من غير أصناف — لو هي تكملة لفاتورة تانية تجاهلها'
+      : 'ما لقيتش أصناف في الصفحة دي';
+    ixApplySupplier(v, false);
+    ix.invs.push(v);
+    last = items.length ? v : null;
+  }
+  ix.invs.sort((a,b)=> (a.fileId - b.fileId) || (a.firstPage - b.firstPage));
+}
+function ixFileDone(fileId){
+  const pages = ix.pages.filter(p=> p.fileId === fileId);
+  return pages.length && pages.every(p=> p.status === 'done' || p.status === 'error');
+}
+async function ixRun(){
+  if(ix.running) return;
+  ix.running = true;
+  const worker = async ()=>{
+    while(!ix.cancel){
+      const p = ix.pages.find(p=> p.status === 'pending');
+      if(!p) return;
+      p.status = 'reading';
+      ixRenderSide(); ixRenderTop();
+      try{ p.result = await ixExtractRetry([p.img]); p.status = 'done'; }
+      catch(e){ p.status = 'error'; p.error = e.message; ix.lastError = e.message; }
+      if(ix.cancel) return;
+      if(ixFileDone(p.fileId)){
+        ixGroupFile(p.fileId);
+        if(ix.cur === null){ const first = ix.invs.find(v=> !v.saved); if(first){ ix.cur = first.id; ix.pageIdx = 0; ixRenderMain(); } }
+        else if(!ixEl('ixMain').querySelector('.ix-form')) ixRenderMain();
+      }
+      ixRenderSide(); ixRenderTop();
+    }
+  };
+  await Promise.all([0,1,2].map(worker));
+  ix.running = false;
+  ixRenderAll();
+  if(!ix.cancel){
+    const errs = ix.pages.filter(p=> p.status === 'error').length;
+    const ok = ix.pages.filter(p=> p.status === 'done').length;
+    if(errs && !ok) ixBanner('القراءة التلقائية مش شغالة: ' + ixFriendlyError(ix.lastError) + ' — تقدر تدخل الفواتير يدويًا وصورتها قدامك.');
+    else ixToast(`خلصت القراءة — ${ix.invs.filter(v=>!v.saved).length} فاتورة جاهزة للمراجعة`);
+  }
+}
+
+// ---------- الحالة والمشاكل ----------
+function ixValidItems(v){ return v.items.filter(it=> (it.name||'').trim() && ixNum(it.price) !== null); }
+function ixSum(v){ return ixValidItems(v).reduce((s,it)=> s + ixNum(it.price), 0); }
+function ixVatRate(v){ const r = ixNum(v.vatRate); return r === null ? 5 : r; }
+function ixCheck(v){
+  const sum = ixSum(v);
+  const vat = sum * ixVatRate(v) / 100;
+  const p = v.printed || {};
+  let target = null, mine = null, label = '';
+  if(p.subtotal !== null && p.subtotal !== undefined){ target = p.subtotal; mine = sum; label = 'قبل الضريبة'; }
+  else if(p.total !== null && p.total !== undefined){ target = p.total; mine = sum + vat; label = 'بعد الضريبة'; }
+  if(target === null) return { state:'none', sum, vat };
+  const diff = mine - target;
+  const ok = Math.abs(diff) <= Math.max(1, Math.abs(target) * 0.005);
+  return { state: ok ? 'ok' : 'err', sum, vat, target, mine, diff, label };
+}
+function ixDupInDb(v){
+  if(!v.invoiceNumber || !v.store) return null;
+  const n = normalizeInvoiceNumber(v.invoiceNumber);
+  return invoices.find(i=> i.store === v.store && i.invoiceNumber && normalizeInvoiceNumber(i.invoiceNumber) === n) || null;
+}
+function ixDupInBatch(v){
+  if(!v.invoiceNumber || !v.store) return null;
+  const n = normalizeInvoiceNumber(v.invoiceNumber);
+  return ix.invs.find(o=> o !== v && !o.skipped && o.store === v.store && o.invoiceNumber && normalizeInvoiceNumber(o.invoiceNumber) === n && ix.invs.indexOf(o) < ix.invs.indexOf(v)) || null;
+}
+function ixIssues(v){
+  if(v.saved) return { errs:[], warns:[], infos:[], status:'saved', check: ixCheck(v) };
+  const errs = [], warns = [], infos = [];
+  const valid = ixValidItems(v);
+  if(!valid.length) errs.push(v.readError ? v.readError + ' — اكتب الأصناف من الصورة أو اضغط "اقرأ تاني"' : 'مفيش أصناف بسعر');
+  else if(v.readError && /ما اتقراتش/.test(v.readError)) infos.push(v.readError);
+  const partial = v.items.filter(it=> (it.name||'').trim() && ixNum(it.price) === null).length;
+  if(partial) errs.push(`${partial} سطر من غير سعر`);
+  if(!(v.store||'').trim() && valid.length) errs.push('اسم المورد ناقص');
+  const c = ixCheck(v);
+  if(valid.length && c.state === 'err') errs.push(`مجموع الأصناف ${ixFmt(c.mine)} مش مساوي الإجمالي المطبوع ${ixFmt(c.target)} (${c.label}) — الفرق ${ixFmt(Math.abs(c.diff))}. قارن الأسطر بالصورة.`);
+  const dupDb = ixDupInDb(v);
+  if(dupDb) errs.push(`الفاتورة رقم ${v.invoiceNumber} من ${v.store} متسجلة قبل كده بتاريخ ${dupDb.date || '—'}`);
+  const dupB = ixDupInBatch(v);
+  if(dupB) errs.push(`نفس رقم الفاتورة متكرر في الملفات اللي رفعتها (غالبًا نفس الفاتورة اتصورت مرتين)`);
+  if(!valid.length) { /* لما الفاتورة فاضية كفاية الخطأ الأساسي */ }
+  else {
+  if(c.state === 'none') warns.push('مفيش إجمالي مطبوع اتقرا للمقارنة — راجع الأصناف بنفسك');
+  if(!v.date) warns.push('التاريخ ناقص');
+  else if(v.date > ixToday()) warns.push('التاريخ في المستقبل — اتأكد منه');
+  if(!v.invoiceNumber) warns.push('رقم الفاتورة ناقص (من غيره البرنامج مش هيعرف يمنع التكرار)');
+  if(v.store && !ixKnownSuppliers().includes(v.store)) warns.push('مورد جديد — أول مرة يتسجل. لو هو موجود باسم تاني اختاره من القايمة');
+  }
+  let status = errs.length ? (v.approved ? 'approved' : 'err') : (warns.length ? 'warn' : 'ok');
+  if(v.saved) status = 'saved';
+  else if(v.skipped) status = 'skipped';
+  return { errs, warns, infos, status, check: c };
+}
+function ixSavable(v){
+  if(v.saved || v.skipped) return false;
+  const st = ixIssues(v).status;
+  return (st === 'ok' || st === 'warn' || st === 'approved') && ixValidItems(v).length && (v.store||'').trim();
+}
+
+// ---------- الرسم ----------
+function ixToast(msg){
+  const t = ixEl('ixToast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(ixToast._t); ixToast._t = setTimeout(()=> t.classList.remove('show'), 3800);
+}
+function ixBanner(msg){ const b = ixEl('ixBanner'); b.textContent = msg || ''; b.classList.toggle('show', !!msg); }
+function ixRenderAll(){ ixRenderTop(); ixRenderSide(); ixRenderMain(); }
+function ixRenderTop(){
+  const st = ix.invs.map(v=> ixIssues(v).status);
+  const reading = ix.pages.filter(p=> p.status === 'pending' || p.status === 'reading').length;
+  const ready = ix.invs.filter(ixSavable).length;
+  const need = st.filter(s=> s === 'err').length;
+  const saved = st.filter(s=> s === 'saved').length;
+  const chips = [];
+  if(reading) chips.push(`<span class="ix-chip">بيتقري <b>${reading}</b> صفحة</span>`);
+  if(ix.invs.length){
+    chips.push(`<span class="ix-chip">جاهزة <b>${ready}</b></span>`);
+    if(need) chips.push(`<span class="ix-chip" style="background:rgba(166,64,45,.55);">محتاجة مراجعة <b>${need}</b></span>`);
+    if(saved) chips.push(`<span class="ix-chip">اتحفظت <b>${saved}</b></span>`);
+  }
+  ixEl('ixCounts').innerHTML = chips.join('');
+  const btn = ixEl('ixSaveBtn');
+  btn.disabled = !ready || ix.saving;
+  btn.textContent = ix.saving ? 'جاري الحفظ...' : (ready ? `حفظ ${ready} فاتورة جاهزة` : 'حفظ');
+}
+function ixRenderSide(){
+  const counts = { all:0, need:0, ready:0, saved:0 };
+  const rows = [];
+  ix.invs.forEach(v=>{
+    const iss = ixIssues(v);
+    counts.all++;
+    if(iss.status === 'err') counts.need++;
+    if(iss.status === 'saved') counts.saved++;
+    if(ixSavable(v)) counts.ready++;
+    const show = ix.filter === 'all' || (ix.filter === 'need' && iss.status === 'err') || (ix.filter === 'ready' && ixSavable(v)) || (ix.filter === 'saved' && iss.status === 'saved');
+    if(!show) return;
+    const total = ixSum(v) * (1 + ixVatRate(v)/100);
+    const sub = [v.invoiceNumber ? '#' + v.invoiceNumber : '', v.date || '', v.skipped ? 'متجاهلة' : '', v.saved ? 'اتحفظت ✓' : ''].filter(Boolean).join(' · ');
+    rows.push(`<button class="ix-item st-${iss.status} ${ix.cur===v.id?'on':''}" data-inv="${v.id}">
+      <span class="ix-dot"></span>
+      <span class="ix-item-main"><b dir="auto">${escapeHtml(v.store || 'مورد غير معروف')}</b><small>${escapeHtml(sub || '—')}</small></span>
+      <span class="ix-item-amt mono">${ixValidItems(v).length ? ixFmt(total) : ''}</span>
+    </button>`);
+  });
+  // ملفات لسه بتتقري
+  const pendingFiles = [...new Set(ix.pages.map(p=> p.fileId))].filter(f=> !ix.groupedFiles.has(f));
+  pendingFiles.forEach(f=>{
+    const ps = ix.pages.filter(p=> p.fileId === f);
+    const done = ps.filter(p=> p.status === 'done' || p.status === 'error').length;
+    rows.push(`<div class="ix-pending"><span class="ix-spin"></span><span>${escapeHtml(ps[0].fileName)} — بيتقري ${done} من ${ps.length} صفحة</span></div>`);
+  });
+  if(!rows.length) rows.push(`<div class="ix-pending">مفيش فواتير هنا</div>`);
+  ixEl('ixList').innerHTML = rows.join('');
+  const f = [['all','الكل',counts.all],['need','محتاجة مراجعة',counts.need],['ready','جاهزة',counts.ready],['saved','اتحفظت',counts.saved]];
+  ixEl('ixFilters').innerHTML = f.filter(x=> x[0]==='all' || x[2]).map(([k,l,n])=> `<button class="ix-filter ${ix.filter===k?'on':''}" data-filter="${k}">${l} ${n}</button>`).join('');
+}
+function ixCurInv(){ return ix.invs.find(v=> v.id === ix.cur) || null; }
+function ixRenderMain(){
+  const m = ixEl('ixMain');
+  const v = ixCurInv();
+  if(!v){
+    const reading = ix.pages.some(p=> p.status === 'pending' || p.status === 'reading');
+    m.innerHTML = `<div class="ix-empty">${reading ? 'جاري قراءة الفواتير…<br>أول ما يخلص ملف هتظهر فواتيره هنا وتقدر تبدأ تراجع' : 'اختار فاتورة من القايمة'}</div>`;
+    return;
+  }
+  const pages = v.pageIds.map(id=> ix.pages.find(p=> p.id === id)).filter(Boolean);
+  if(ix.pageIdx >= pages.length) ix.pageIdx = 0;
+  const pg = pages[ix.pageIdx];
+  const viewer = pg ? `
+    <div class="ix-viewer">
+      <div class="ix-vtools">
+        ${pages.length > 1 ? pages.map((p,i)=> `<button class="${i===ix.pageIdx?'on':''}" data-pg="${i}">صفحة ${p.pageNo}</button>`).join('') : ''}
+        <span class="ix-sp"></span>
+        <button data-zoom="out" title="تصغير">−</button>
+        <button data-zoom="fit">ملء العرض</button>
+        <button data-zoom="in" title="تكبير">+</button>
+        <button data-rot="270" title="لف لليسار">⟲</button>
+        <button data-rot="90" title="لف لليمين">⟳</button>
+      </div>
+      <div class="ix-vimg" id="ixVimg"><img id="ixImg" src="data:image/jpeg;base64,${pg.img}" style="width:${Math.round(ix.zoom*100)}%" alt=""></div>
+      <div class="ix-vfoot">${escapeHtml(pg.fileName)} — صفحة ${pg.pageNo} من ${pg.pageCount}${pages.length>1 ? ` · الفاتورة دي على ${pages.length} صفحات` : ''}</div>
+    </div>` : `<div class="ix-viewer"><div class="ix-noimg">فاتورة يدوية — مفيش صورة</div></div>`;
+
+  const ro = v.saved ? 'disabled' : '';
+  const rows = v.items.map((it,i)=>{
+    const price = ixNum(it.price), qty = ixNum(it.qty) || 1;
+    const bad = (it.name||'').trim() && price === null;
+    return `<tr>
+      <td><input dir="auto" data-i="${i}" data-k="name" value="${escapeHtml(it.name||'')}" list="existingProducts" placeholder="اسم الصنف" ${ro} title="${escapeHtml(it.barcode ? 'باركود: '+it.barcode : '')}"></td>
+      <td><input class="num" data-i="${i}" data-k="qty" value="${it.qty ?? ''}" ${ro}></td>
+      <td><input dir="auto" data-i="${i}" data-k="unit" value="${escapeHtml(it.unit||'')}" placeholder="الوحدة" ${ro}></td>
+      <td><input class="num ${bad?'bad':''}" data-i="${i}" data-k="price" value="${price===null?'':price}" placeholder="0.00" ${ro}></td>
+      <td class="col-up"><span class="ix-up" data-up="${i}">${price===null?'—':ixFmt(price/qty)}</span></td>
+      <td class="col-dest"><input data-i="${i}" data-k="destination" value="${escapeHtml(it.destination||'')}" list="existingDestinations" placeholder="الجهة" ${ro}></td>
+      <td>${v.saved ? '' : `<button class="ix-rm" data-rm="${i}" title="حذف السطر">×</button>`}</td>
+    </tr>`;
+  }).join('');
+
+  const iss = ixIssues(v);
+  const storeNote = (v.storeOriginal && !v.saved) ? `<div class="ix-note">اتطابق مع المورد الموجود عندك. الاسم المكتوب في الفاتورة: "${escapeHtml(v.storeOriginal)}" — <a href="#" data-act="undo-store">استخدم الاسم ده بدلًا منه</a></div>` : '';
+  const form = `
+    <div class="ix-form">
+      ${v.saved ? `<div class="ix-saved-box">✓ الفاتورة دي اتحفظت. أي تعديل بعد كده من سجل الفواتير.</div>` : ''}
+      ${v.saveError ? `<div class="ix-issue err">فشل الحفظ: ${escapeHtml(v.saveError)}</div>` : ''}
+      <div class="ix-issues" id="ixIssues">${ixIssuesHtml(iss, v)}</div>
+      <div class="ix-grid">
+        <div class="ix-field full"><label>المورد</label><input data-f="store" value="${escapeHtml(v.store||'')}" list="ixSuppliers" placeholder="اسم المورد" ${ro}>${storeNote}</div>
+        <div class="ix-field"><label>التاريخ</label><input type="date" data-f="date" value="${escapeHtml(v.date||'')}" ${ro}></div>
+        <div class="ix-field"><label>رقم الفاتورة</label><input data-f="invoiceNumber" value="${escapeHtml(v.invoiceNumber||'')}" ${ro}></div>
+        <div class="ix-field"><label>الدفع</label><select data-f="paymentType" ${ro}>
+          <option value="" ${!v.paymentType?'selected':''}>غير محدد</option>
+          <option value="credit" ${v.paymentType==='credit'?'selected':''}>آجل (كريديت)</option>
+          <option value="cash" ${v.paymentType==='cash'?'selected':''}>كاش</option>
+        </select></div>
+        <div class="ix-field"><label>الضريبة %</label><input class="num" data-f="vatRate" value="${v.vatRate ?? 5}" ${ro} style="direction:ltr;text-align:left;"></div>
+      </div>
+      <table class="ix-items">
+        <colgroup><col><col style="width:68px"><col style="width:66px"><col style="width:96px"><col class="col-up" style="width:74px"><col class="col-dest" style="width:96px"><col style="width:26px"></colgroup>
+        <thead><tr><th>الصنف</th><th>الكمية</th><th>الوحدة</th><th>الإجمالي قبل الضريبة</th><th class="col-up">سعر الوحدة</th><th class="col-dest">الجهة</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${v.saved ? '' : `<button class="ix-addrow" data-act="addrow">+ إضافة سطر</button>`}
+      <div class="ix-totals" id="ixTotals">${ixTotalsHtml(v, iss.check)}</div>
+      <div class="ix-actions" id="ixActions">${ixActionsHtml(v, iss)}</div>
+    </div>`;
+  m.innerHTML = viewer + form;
+}
+function ixIssuesHtml(iss, v){
+  const out = [];
+  iss.errs.forEach(e=> out.push(`<div class="ix-issue err">✕ ${escapeHtml(e)}</div>`));
+  iss.warns.forEach(e=> out.push(`<div class="ix-issue warn">! ${escapeHtml(e)}</div>`));
+  iss.infos.forEach(e=> out.push(`<div class="ix-issue info">${escapeHtml(e)}</div>`));
+  if(!v.saved && !v.skipped && !iss.errs.length && iss.check.state === 'ok') out.unshift(`<div class="ix-issue ok">✓ مجموع الأصناف مطابق للإجمالي المطبوع في الفاتورة</div>`);
+  if(v.approved && iss.errs.length) out.push(`<div class="ix-issue info">اعتمدتها رغم الملاحظات — هتتحفظ زي ما هي. <a href="#" data-act="unapprove">إلغاء الاعتماد</a></div>`);
+  if(v.skipped) out.unshift(`<div class="ix-issue info">الفاتورة دي متجاهلة ومش هتتحفظ. <a href="#" data-act="unskip">رجّعها</a></div>`);
+  return out.join('');
+}
+function ixTotalsHtml(v, c){
+  const total = c.sum + c.vat;
+  let match;
+  if(c.state === 'ok') match = `<div class="ix-match ok">✓ مطابق للإجمالي المطبوع (${ixFmt(c.target)})</div>`;
+  else if(c.state === 'err') match = `<div class="ix-match err">✕ الإجمالي المطبوع ${ixFmt(c.target)} ${c.label} — الفرق ${ixFmt(Math.abs(c.diff))}</div>`;
+  else match = `<div class="ix-match none">مفيش إجمالي مطبوع للمقارنة</div>`;
+  return `
+    <div class="ix-trow"><span>مجموع الأصناف (قبل الضريبة)</span><span class="mono">${ixFmt(c.sum)}</span></div>
+    <div class="ix-trow"><span>الضريبة ${ixVatRate(v)}%</span><span class="mono">${ixFmt(c.vat)}</span></div>
+    <div class="ix-trow grand"><span>الإجمالي</span><span class="mono">${ixFmt(total)}</span></div>
+    ${match}`;
+}
+function ixActionsHtml(v, iss){
+  if(v.saved) return `<button class="ix-act primary" data-act="next">الفاتورة اللي بعدها ←</button>`;
+  const hasImg = v.pageIds.length > 0;
+  return `
+    <button class="ix-act primary" data-act="next">الفاتورة اللي بعدها ←</button>
+    ${iss.errs.length && !v.approved && ixValidItems(v).length && v.store ? `<button class="ix-act warnbtn" data-act="approve">اعتمدها رغم الملاحظات</button>` : ''}
+    ${hasImg ? `<button class="ix-act" data-act="reread" ${v.busy?'disabled':''}>${v.busy ? 'بيتقري…' : 'اقرأ تاني'}</button>` : ''}
+    ${v.skipped ? `<button class="ix-act" data-act="unskip">رجّعها</button>` : `<button class="ix-act" data-act="skip">تجاهل الفاتورة</button>`}`;
+}
+function ixRefreshComputed(){
+  const v = ixCurInv(); if(!v) return;
+  const iss = ixIssues(v);
+  const a = ixEl('ixIssues'); if(a) a.innerHTML = ixIssuesHtml(iss, v);
+  const t = ixEl('ixTotals'); if(t) t.innerHTML = ixTotalsHtml(v, iss.check);
+  const ac = ixEl('ixActions'); if(ac) ac.innerHTML = ixActionsHtml(v, iss);
+  v.items.forEach((it,i)=>{
+    const el = ixEl('ixMain').querySelector(`[data-up="${i}"]`);
+    const price = ixNum(it.price), qty = ixNum(it.qty) || 1;
+    if(el) el.textContent = price === null ? '—' : ixFmt(price/qty);
+    const pin = ixEl('ixMain').querySelector(`input[data-i="${i}"][data-k="price"]`);
+    if(pin) pin.classList.toggle('bad', !!(it.name||'').trim() && price === null);
+  });
+  ixRenderSide(); ixRenderTop();
+}
+function ixSelect(id){
+  ix.cur = id; ix.pageIdx = 0;
+  ixRenderSide(); ixRenderMain();
+  const f = document.querySelector('.ix-form'); if(f) f.scrollTop = 0;
+  if(window.innerWidth <= 900){ const mm = ixEl('ixMain'); if(mm) mm.scrollIntoView({behavior:'smooth'}); }
+}
+function ixNext(){
+  const v = ixCurInv();
+  const order = ix.invs;
+  const start = v ? order.indexOf(v) : -1;
+  const rest = order.slice(start+1).concat(order.slice(0, start+1));
+  const nxt = rest.find(o=> !o.saved && !o.skipped && ixIssues(o).status === 'err') || rest.find(o=> !o.saved && !o.skipped && o !== v);
+  if(nxt) ixSelect(nxt.id);
+  else ixToast('مفيش فواتير تانية محتاجة مراجعة 👍');
+}
+
+// ---------- الأحداث ----------
+function ixShow(which){
+  ixEl('ixPick').style.display = which === 'pick' ? 'flex' : 'none';
+  ixEl('ixReview').classList.toggle('show', which === 'review');
+}
+function ixOpen(){
+  ix.pages = []; ix.invs = []; ix.cur = null; ix.filter = 'all'; ix.cancel = false; ix.groupedFiles = new Set(); ix.zoom = 1; ix.lastError = ''; ix.saving = false;
+  existingProductNamesForSuggestions = [...getProductSeries().values()].map(e => e.displayName);
+  ixEl('ixSuppliers').innerHTML = ixKnownSuppliers().sort().map(s=> `<option value="${escapeHtml(s)}">`).join('');
+  ixBanner('');
+  ixShow('pick');
+  ixRenderTop();
+  ixEl('ixScreen').classList.add('show');
+  document.body.style.overflow = 'hidden';
+}
+function ixClose(){
+  const pending = ix.invs.filter(v=> !v.saved && !v.skipped && ixValidItems(v).length).length;
+  if(pending && !confirm(`فيه ${pending} فاتورة لسه ما اتحفظتش. تقفل وتسيبهم؟`)) return;
+  ix.cancel = true;
+  ixEl('ixScreen').classList.remove('show');
+  document.body.style.overflow = '';
+}
+async function ixAddFiles(fileList){
+  const files = [...fileList].filter(f=> f.type === 'application/pdf' || (f.type||'').startsWith('image/'));
+  if(!files.length){ ixToast('اختار ملفات PDF أو صور'); return; }
+  ix.cancel = false;
+  ixShow('review');
+  ixEl('ixMain').innerHTML = `<div class="ix-empty"><span class="ix-spin" style="width:22px;height:22px;"></span>&nbsp; جاري تجهيز الصفحات…</div>`;
+  for(const file of files){
+    const fileId = ix.seq++;
+    let imgs = [];
+    try{ imgs = file.type === 'application/pdf' ? await pdfToImages(file, 80) : [await fileToBase64(file)]; }
+    catch(e){
+      console.error(e);
+      ix.groupedFiles.add(fileId);
+      ix.invs.push(ixNewInv({ fileId, items:[ixEmptyItem()], readError:`تعذّر فتح الملف ${file.name}` }));
+      continue;
+    }
+    imgs.forEach((b64,i)=> ix.pages.push({ id: ix.seq++, fileId, fileName: file.name, pageNo: i+1, pageCount: imgs.length, img: b64, status:'pending' }));
+  }
+  ixRenderAll();
+  ixRun();
+}
+function ixAddManual(){
+  ixShow('review');
+  const v = ixNewInv({ fileId: 1e9 + ix.seq, date: ixToday(), items:[ixEmptyItem(), ixEmptyItem(), ixEmptyItem()] });
+  ix.invs.push(v);
+  ixSelect(v.id);
+  ixRenderTop();
+  const s = document.querySelector('.ix-form [data-f="store"]'); if(s) s.focus();
+}
+async function ixReread(v){
+  const images = v.pageIds.map(id=> ix.pages.find(p=> p.id === id)).filter(Boolean).map(p=> p.img);
+  if(!images.length) return;
+  v.busy = true; ixRefreshComputed();
+  try{
+    const r = await ixExtractRetry(images);
+    const items = ixCleanItems(r.items);
+    if(!items.length){ ixToast('برضه ما لقيتش أصناف — دخّلها يدويًا من الصورة'); }
+    else{
+      v.items = items;
+      if(r.store) v.store = String(r.store).trim();
+      if(r.date) v.date = r.date;
+      if(r.invoiceNumber) v.invoiceNumber = String(r.invoiceNumber).trim();
+      v.printed = { subtotal:null, vat:null, total:null }; ixMergePrinted(v, ixPrinted(r));
+      v.readError = ''; v.approved = false;
+      ixApplySupplier(v, false);
+      ixToast('اتقرت تاني ✓');
+    }
+  }catch(e){ ixToast('فشلت القراءة: ' + ixFriendlyError(e.message)); }
+  v.busy = false;
+  if(ix.cur === v.id) ixRenderMain();
+  ixRenderSide(); ixRenderTop();
+}
+async function ixSaveAll(){
+  const list = ix.invs.filter(ixSavable);
+  if(!list.length) return;
+  ix.saving = true; ixRenderTop();
+  let ok = 0, fail = 0;
+  for(const v of list){
+    const items = ixValidItems(v).map(it=>({ name: it.name.trim(), barcode: (it.barcode||'').trim(), price: ixNum(it.price), qty: ixNum(it.qty) || 1, unit: (it.unit||'').trim(), destination: (it.destination||'').trim() }));
+    try{
+      await insertInvoiceRemote(v.store.trim(), v.date || '', items, ixVatRate(v), (v.invoiceNumber||'').trim(), v.paymentType || '');
+      v.saved = true; v.saveError = ''; ok++;
+    }catch(e){ console.error(e); v.saveError = e.message || String(e); fail++; }
+    ixRenderSide(); ixRenderTop();
+  }
+  try{ await refreshInvoicesFromServer(); renderAll(); }catch(e){ console.error(e); }
+  ix.saving = false;
+  ixEl('ixSuppliers').innerHTML = ixKnownSuppliers().sort().map(s=> `<option value="${escapeHtml(s)}">`).join('');
+  ixRenderAll();
+  const left = ix.invs.filter(v=> !v.saved && !v.skipped).length;
+  ixToast(`✓ اتحفظت ${ok} فاتورة` + (fail ? ` — فشل ${fail}` : '') + (left ? ` — فاضل ${left} محتاجين مراجعة` : ''));
+}
+
+ixEl('ixCloseBtn').addEventListener('click', ixClose);
+ixEl('ixSaveBtn').addEventListener('click', ixSaveAll);
+ixEl('ixMoreFilesBtn').addEventListener('click', ()=> ixEl('ixFileInput').click());
+ixEl('ixDrop').addEventListener('click', ()=> ixEl('ixFileInput').click());
+ixEl('ixFileInput').addEventListener('change', (e)=>{ const f = e.target.files; if(f && f.length) ixAddFiles(f); e.target.value = ''; });
+ixEl('ixManualBtn').addEventListener('click', ixAddManual);
+ixEl('ixManualBtn2').addEventListener('click', ixAddManual);
+['dragenter','dragover'].forEach(ev=> ixEl('ixScreen').addEventListener(ev, (e)=>{ e.preventDefault(); ixEl('ixDrop').classList.add('over'); }));
+['dragleave','drop'].forEach(ev=> ixEl('ixScreen').addEventListener(ev, (e)=>{ e.preventDefault(); ixEl('ixDrop').classList.remove('over'); }));
+ixEl('ixScreen').addEventListener('drop', (e)=>{ if(e.dataTransfer && e.dataTransfer.files.length) ixAddFiles(e.dataTransfer.files); });
+document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape' && ixEl('ixScreen').classList.contains('show') && !document.querySelector('.overlay.show')) ixClose(); });
+
+ixEl('ixFilters').addEventListener('click', (e)=>{ const b = e.target.closest('[data-filter]'); if(b){ ix.filter = b.dataset.filter; ixRenderSide(); } });
+ixEl('ixList').addEventListener('click', (e)=>{ const b = e.target.closest('[data-inv]'); if(b) ixSelect(Number(b.dataset.inv)); });
+
+const ixMain = ixEl('ixMain');
+ixMain.addEventListener('input', (e)=>{
+  const v = ixCurInv(); if(!v || v.saved) return;
+  const t = e.target;
+  if(t.dataset.f){ v[t.dataset.f] = t.value; if(t.dataset.f === 'store') v.storeOriginal = ''; }
+  else if(t.dataset.k){ const it = v.items[Number(t.dataset.i)]; if(it) it[t.dataset.k] = t.value; }
+  else return;
+  ixRefreshComputed();
+});
+ixMain.addEventListener('change', (e)=>{
+  const v = ixCurInv(); if(!v || v.saved) return;
+  if(e.target.dataset.f === 'store'){ ixApplySupplier(v, true); ixRenderMain(); ixRefreshComputed(); }
+});
+ixMain.addEventListener('click', async (e)=>{
+  const v = ixCurInv(); if(!v) return;
+  const t = e.target.closest('[data-act],[data-rm],[data-pg],[data-zoom],[data-rot]');
+  if(!t){
+    if(e.target.id === 'ixImg'){ ix.zoom = ix.zoom >= 1.6 ? 1 : 2; e.target.style.width = Math.round(ix.zoom*100) + '%'; }
+    return;
+  }
+  if(t.dataset.rm !== undefined){ v.items.splice(Number(t.dataset.rm), 1); if(!v.items.length) v.items.push(ixEmptyItem()); ixRenderMain(); ixRefreshComputed(); return; }
+  if(t.dataset.pg !== undefined){ ix.pageIdx = Number(t.dataset.pg); ixRenderMain(); return; }
+  if(t.dataset.zoom){
+    ix.zoom = t.dataset.zoom === 'fit' ? 1 : Math.max(0.4, Math.min(3, ix.zoom + (t.dataset.zoom === 'in' ? 0.25 : -0.25)));
+    const img = ixEl('ixImg'); if(img) img.style.width = Math.round(ix.zoom*100) + '%';
+    return;
+  }
+  if(t.dataset.rot){
+    const p = ix.pages.find(p=> p.id === v.pageIds[ix.pageIdx]); if(!p) return;
+    t.disabled = true;
+    try{ p.img = await rotateImageBase64(p.img, Number(t.dataset.rot)); }catch(err){ console.error(err); }
+    ixRenderMain();
+    if(!v.saved) ixToast('لو القراءة كانت غلط بسبب اتجاه الصورة، اضغط "اقرأ تاني"');
+    return;
+  }
+  e.preventDefault();
+  const act = t.dataset.act;
+  if(act === 'next') ixNext();
+  else if(act === 'addrow'){ v.items.push(ixEmptyItem()); ixRenderMain(); const ins = ixMain.querySelectorAll('input[data-k="name"]'); if(ins.length) ins[ins.length-1].focus(); }
+  else if(act === 'approve'){ v.approved = true; ixRefreshComputed(); }
+  else if(act === 'unapprove'){ v.approved = false; ixRefreshComputed(); }
+  else if(act === 'skip'){ v.skipped = true; ixRefreshComputed(); ixNext(); }
+  else if(act === 'unskip'){ v.skipped = false; ixRefreshComputed(); }
+  else if(act === 'reread') ixReread(v);
+  else if(act === 'undo-store'){ v.store = v.storeOriginal; v.storeOriginal = ''; ixApplySupplier(v, true); ixRenderMain(); ixRefreshComputed(); }
+});
+/* ==== INBOX JS END ==== */
+/* ==== PAYABLES JS START ==== */
+// المديونية للموردين: المدفوعات، أرصدة الموردين، أعمار الديون، المستحق والمتأخر، كشف حساب المورد
+let apPayments = [];               // {id, supplier, date, amount, method, reference, note, allocs:[{invoiceId, amount}]}
+let apOpening = new Map();         // supplier -> {amount, asOf}
+let apSchemaMissing = false;
+const ap = { supplier: '', asOf: '', showZero: false };
+const apEl = (id)=> document.getElementById(id);
+const apR = (n)=> Math.round((Number(n)||0) * 100) / 100;
+const apFmt = (n)=> { const v = apR(n); return v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+const apCell = (n)=> Math.abs(apR(n)) < 0.005 ? '<span class="zero">—</span>' : apFmt(n);
+const apToday = ()=> new Date().toISOString().slice(0,10);
+const AP_METHODS = { bank_transfer:'تحويل بنكي', cheque:'شيك', cash:'نقدي', card:'بطاقة', other:'أخرى' };
+
+async function apLoad(){
+  apPayments = []; apOpening = new Map(); apSchemaMissing = false;
+  if(!currentWorkspace) return;
+  const { data, error } = await sb.from('supplier_payments')
+    .select('id, supplier_name, pay_date, amount, method, reference, note, created_at, payment_allocations(invoice_id, amount)')
+    .eq('workspace_id', currentWorkspace.id).order('pay_date', { ascending: true });
+  if(error){
+    if(/relation|does not exist|schema cache|Could not find/i.test(error.message || '')) apSchemaMissing = true;
+    else console.error(error);
+    return;
+  }
+  apPayments = (data||[]).map(r=>({ id: r.id, supplier: r.supplier_name, date: r.pay_date, amount: Number(r.amount)||0, method: r.method||'', reference: r.reference||'', note: r.note||'', createdAt: r.created_at||'',
+    allocs: (r.payment_allocations||[]).map(a=>({ invoiceId: a.invoice_id, amount: Number(a.amount)||0 })) }));
+  const ob = await sb.from('supplier_opening_balances').select('supplier_name, amount, as_of').eq('workspace_id', currentWorkspace.id);
+  if(!ob.error) (ob.data||[]).forEach(r=> apOpening.set(r.supplier_name, { amount: Number(r.amount)||0, asOf: r.as_of }));
+}
+
+function apInvoiceTotal(inv){
+  const sub = (inv.items||[]).reduce((s,it)=> s + (Number(it.price)||0), 0);
+  const rate = (inv.vatRate === undefined || inv.vatRate === null || isNaN(Number(inv.vatRate))) ? 5 : Number(inv.vatRate);
+  return apR(sub * (1 + rate/100));
+}
+function apIsCash(inv){
+  const pt = inv.paymentType || ((supplierPaymentMap.get(inv.store)||{}).type || '');
+  return pt === 'cash';
+}
+function apCreditDays(supplier){ const p = supplierPaymentMap.get(supplier); return p && p.creditDays !== null && p.creditDays !== undefined ? Number(p.creditDays) : null; }
+function apDue(inv){ const d = apCreditDays(inv.store); return d === null ? (inv.date || '') : (addDaysToDate(inv.date, d) || inv.date || ''); }
+function apDaysBetween(a, b){ if(!a || !b) return 0; return Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00')) / 86400000); }
+function apBucket(daysOver){ return daysOver <= 0 ? 0 : daysOver <= 30 ? 1 : daysOver <= 60 ? 2 : daysOver <= 90 ? 3 : 4; }
+
+// الحسبة كلها لتاريخ معيّن (asOf): فواتير الآجل - المدفوعات + الرصيد الافتتاحي
+function apCompute(asOf){
+  const sups = new Map();
+  const S = (name)=>{ if(!sups.has(name)) sups.set(name, { name, opening:0, openingAsOf:'', openingLeft:0, invoices:[], payments:[], unalloc:0, advance:0, buckets:[0,0,0,0,0], balance:0, overdue:0, dueSoon:0, lastPay:null, totalInv:0, totalPaid:0 }); return sups.get(name); };
+  const allocByInv = new Map();
+  apPayments.filter(p=> p.date <= asOf).forEach(p=>{
+    const s = S(p.supplier);
+    s.payments.push(p); s.totalPaid += p.amount;
+    const used = p.allocs.reduce((t,a)=> t + a.amount, 0);
+    s.unalloc += Math.max(0, p.amount - used);
+    p.allocs.forEach(a=> allocByInv.set(a.invoiceId, (allocByInv.get(a.invoiceId)||0) + a.amount));
+    if(!s.lastPay || p.date > s.lastPay.date) s.lastPay = p;
+  });
+  invoices.forEach(inv=>{
+    if(!inv.store || apIsCash(inv)) return;
+    if(inv.date && inv.date > asOf) return;
+    const s = S(inv.store);
+    const total = apInvoiceTotal(inv);
+    const paid = Math.min(total, allocByInv.get(inv.id) || 0);
+    const open = apR(total - paid);
+    const due = apDue(inv);
+    const daysOver = apDaysBetween(due || asOf, asOf);
+    s.invoices.push({ inv, total, paid, open, due, daysOver });
+    s.totalInv += total;
+  });
+  apOpening.forEach((o, name)=>{ if(o.asOf <= asOf){ const s = S(name); s.opening = o.amount; s.openingAsOf = o.asOf; } });
+  sups.forEach(s=>{
+    s.openingLeft = Math.max(0, apR(s.opening - s.unalloc));
+    s.advance = Math.max(0, apR(s.unalloc - s.opening));
+    if(s.openingLeft > 0) s.buckets[apBucket(apDaysBetween(s.openingAsOf, asOf))] += s.openingLeft;
+    s.invoices.forEach(r=>{
+      if(r.open <= 0.004) return;
+      s.buckets[apBucket(r.daysOver)] += r.open;
+      if(r.daysOver > 0) s.overdue += r.open;
+      else if(r.daysOver > -8) s.dueSoon += r.open;
+    });
+    if(s.openingLeft > 0 && apDaysBetween(s.openingAsOf, asOf) > 0) s.overdue += s.openingLeft;
+    s.balance = apR(s.buckets.reduce((a,b)=> a+b, 0) - s.advance);
+    s.invoices.sort((a,b)=> (a.due||'').localeCompare(b.due||''));
+  });
+  return sups;
+}
+
+// ---------- الرسم ----------
+function apRender(){
+  const root = apEl('apRoot'); if(!root) return;
+  if(!ap.asOf) ap.asOf = apToday();
+  if(apSchemaMissing){
+    root.innerHTML = `<div class="ap-banner"><b>محتاج خطوة واحدة قبل ما المديونية تشتغل:</b><br>
+      افتح Supabase ← SQL Editor ← New query، والصق ملف <span class="mono">supabase-schema-v18-payables.sql</span> واضغط Run. بعدها حدّث الصفحة.<br>
+      الملف بيضيف جداول المدفوعات والأرصدة الافتتاحية بس، ومش بيغيّر أي بيانات موجودة.</div>`;
+    return;
+  }
+  if(ap.supplier) return apRenderSupplier(root);
+  const sups = [...apCompute(ap.asOf).values()];
+  const totalBal = sups.reduce((t,s)=> t + s.balance, 0);
+  const totalOver = sups.reduce((t,s)=> t + s.overdue, 0);
+  const totalSoon = sups.reduce((t,s)=> t + s.dueSoon, 0);
+  const monthStart = ap.asOf.slice(0,7) + '-01';
+  const paidMonth = apPayments.filter(p=> p.date >= monthStart && p.date <= ap.asOf).reduce((t,p)=> t + p.amount, 0);
+  const overCount = sups.filter(s=> s.overdue > 0.004).length;
+  const rows = sups.filter(s=> ap.showZero || Math.abs(s.balance) > 0.004 || s.advance > 0.004).sort((a,b)=> b.balance - a.balance);
+  const tot = [0,0,0,0,0]; let totAdv = 0;
+  rows.forEach(s=>{ s.buckets.forEach((v,i)=> tot[i] += v); totAdv += s.advance; });
+  const cur = escapeHtml(settings.currency || '');
+  const missingTerms = sups.filter(s=> s.invoices.length && apCreditDays(s.name) === null).length;
+
+  // الفواتير المستحقة والمتأخرة (كل الموردين)
+  const dueRows = [];
+  sups.forEach(s=> s.invoices.forEach(r=>{ if(r.open > 0.004 && r.daysOver > -15) dueRows.push(Object.assign({ supplier: s.name }, r)); }));
+  dueRows.sort((a,b)=> b.daysOver - a.daysOver);
+
+  root.innerHTML = `
+    <div class="ap-head">
+      <h3>المديونية للموردين</h3>
+      <label class="ap-asof">الأرصدة في تاريخ <input type="date" id="apAsOf" value="${ap.asOf}"></label>
+      <button class="ap-btn" id="apExportAging">تصدير Excel</button>
+      <button class="ap-btn primary owner-only" data-ap="pay">+ تسجيل دفعة</button>
+    </div>
+    <div class="ap-kpis">
+      <div class="ap-kpi"><div class="lbl">إجمالي المستحق للموردين</div><div class="val">${apFmt(totalBal)}</div><div class="sub">${rows.filter(s=>s.balance>0.004).length} مورد · ${cur}</div></div>
+      <div class="ap-kpi ${totalOver>0.004?'bad':''}"><div class="lbl">متأخر عن ميعاد الاستحقاق</div><div class="val">${apFmt(totalOver)}</div><div class="sub">${overCount} مورد</div></div>
+      <div class="ap-kpi"><div class="lbl">يستحق خلال 7 أيام</div><div class="val">${apFmt(totalSoon)}</div><div class="sub">لسه ما تأخرش</div></div>
+      <div class="ap-kpi"><div class="lbl">مدفوع من أول الشهر</div><div class="val">${apFmt(paidMonth)}</div><div class="sub">${ap.asOf.slice(0,7)}</div></div>
+    </div>
+    ${missingTerms ? `<div class="ap-banner">${missingTerms} مورد آجل من غير مدة سداد محددة، فميعاد استحقاق فواتيرهم اتحسب يوم الفاتورة نفسه (وده بيخليها تبان متأخرة). حدّد مدة الائتمان من "إعدادات الموردين".</div>` : ''}
+    <div class="ap-sec"><h4>أعمار الديون حسب المورد</h4>
+      <span class="hint2">الأعمار محسوبة من تاريخ الاستحقاق (تاريخ الفاتورة + مدة الائتمان) · الفواتير الكاش مش داخلة · <label><input type="checkbox" id="apShowZero" ${ap.showZero?'checked':''}> اظهر الموردين برصيد صفر</label></span>
+    </div>
+    <div class="ap-scroll"><table class="ap-table">
+      <thead><tr><th>المورد</th><th class="n">الرصيد</th><th class="n">لم يستحق</th><th class="n">1–30 يوم</th><th class="n">31–60</th><th class="n">61–90</th><th class="n">أكتر من 90</th><th class="n">دفعات تحت الحساب</th><th>آخر دفعة</th></tr></thead>
+      <tbody>${rows.length ? rows.map(s=> `<tr class="click" data-sup="${escapeHtml(s.name)}">
+        <td class="sup" dir="auto" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</td>
+        <td class="n"><b>${apCell(s.balance)}</b></td>
+        ${s.buckets.map((v,i)=> `<td class="n ${i>=2 && v>0.004 ? 'over':''}">${apCell(v)}</td>`).join('')}
+        <td class="n">${s.advance>0.004 ? '(' + apFmt(s.advance) + ')' : '<span class="zero">—</span>'}</td>
+        <td>${s.lastPay ? escapeHtml(s.lastPay.date) : '<span class="zero">ما فيش</span>'}</td>
+      </tr>`).join('') : `<tr><td colspan="9"><div class="ap-empty">مفيش أرصدة مستحقة في التاريخ ده.</div></td></tr>`}</tbody>
+      ${rows.length ? `<tfoot><tr><td>الإجمالي</td><td class="n">${apFmt(tot.reduce((a,b)=>a+b,0) - totAdv)}</td>${tot.map(v=> `<td class="n">${apCell(v)}</td>`).join('')}<td class="n">${totAdv>0.004?'('+apFmt(totAdv)+')':'—'}</td><td></td></tr></tfoot>` : ''}
+    </table></div>
+    <div class="ap-sec"><h4>فواتير مستحقة ومتأخرة</h4><span class="hint2">المتأخر أولًا، وبعده اللي هيستحق خلال أسبوعين</span></div>
+    <div class="ap-scroll"><table class="ap-table">
+      <thead><tr><th>المورد</th><th>رقم الفاتورة</th><th>تاريخ الفاتورة</th><th>تاريخ الاستحقاق</th><th class="n">قيمة الفاتورة</th><th class="n">المتبقي</th><th>الحالة</th></tr></thead>
+      <tbody>${dueRows.length ? dueRows.slice(0,200).map(r=> `<tr class="click" data-sup="${escapeHtml(r.supplier)}">
+        <td class="sup" dir="auto">${escapeHtml(r.supplier)}</td>
+        <td class="mono">${escapeHtml(r.inv.invoiceNumber||'—')}</td>
+        <td>${escapeHtml(r.inv.date||'—')}</td>
+        <td>${escapeHtml(r.due||'—')}</td>
+        <td class="n">${apFmt(r.total)}</td>
+        <td class="n"><b>${apFmt(r.open)}</b></td>
+        <td>${apStatusPill(r)}</td>
+      </tr>`).join('') : `<tr><td colspan="7"><div class="ap-empty">مفيش فواتير مستحقة أو متأخرة 👍</div></td></tr>`}</tbody>
+    </table></div>`;
+}
+function apStatusPill(r){
+  if(r.open <= 0.004) return `<span class="ap-pill paid">مدفوعة</span>`;
+  const part = r.paid > 0.004 ? ' · مدفوع جزء' : '';
+  if(r.daysOver > 0) return `<span class="ap-pill over">متأخرة ${r.daysOver} يوم${part}</span>`;
+  if(r.daysOver === 0) return `<span class="ap-pill soon">تستحق النهارده${part}</span>`;
+  if(r.daysOver > -8) return `<span class="ap-pill soon">تستحق بعد ${-r.daysOver} يوم${part}</span>`;
+  return r.paid > 0.004 ? `<span class="ap-pill part">مدفوع جزء</span>` : `<span class="ap-pill ok">لم تستحق</span>`;
+}
+
+function apLedger(s){
+  // كشف حساب: فواتير (دائن) ومدفوعات (مدين) بالترتيب الزمني ورصيد متحرك
+  const lines = [];
+  if(s.opening) lines.push({ date: s.openingAsOf, kind:'open', desc:'رصيد افتتاحي', ref:'', credit: s.opening, debit: 0 });
+  s.invoices.forEach(r=> lines.push({ date: r.inv.date || '', kind:'inv', desc:'فاتورة مشتريات', ref: r.inv.invoiceNumber || '', credit: r.total, debit: 0 }));
+  s.payments.forEach(p=> lines.push({ date: p.date, kind:'pay', desc: 'دفعة — ' + (AP_METHODS[p.method] || 'دفع') + (p.note ? ' — ' + p.note : ''), ref: p.reference || '', credit: 0, debit: p.amount, pay: p }));
+  const order = { open:0, inv:1, pay:2 };
+  lines.sort((a,b)=> (a.date||'').localeCompare(b.date||'') || order[a.kind] - order[b.kind]);
+  let bal = 0;
+  lines.forEach(l=>{ bal = apR(bal + l.credit - l.debit); l.balance = bal; });
+  return lines;
+}
+function apRenderSupplier(root){
+  const all = apCompute(ap.asOf);
+  const s = all.get(ap.supplier) || { name: ap.supplier, opening:0, invoices:[], payments:[], buckets:[0,0,0,0,0], balance:0, overdue:0, advance:0, totalInv:0, totalPaid:0 };
+  const days = apCreditDays(s.name);
+  const pay = supplierPaymentMap.get(s.name);
+  const terms = pay ? (pay.type === 'cash' ? 'كاش' : `آجل${days !== null ? ` — ${days} يوم` : ' — مدة السداد غير محددة'}`) : 'شروط الدفع غير محددة';
+  const lines = apLedger(s);
+  const openInv = s.invoices.filter(r=> r.open > 0.004);
+  root.innerHTML = `
+    <button class="ap-back" data-ap="back">→ رجوع لكل الموردين</button>
+    <div class="ap-head">
+      <h3 dir="auto">${escapeHtml(s.name)}</h3>
+      <span class="ap-terms">${escapeHtml(terms)}</span>
+      <label class="ap-asof">في تاريخ <input type="date" id="apAsOf" value="${ap.asOf}"></label>
+      <button class="ap-btn" id="apExportLedger">كشف حساب Excel</button>
+      <button class="ap-btn owner-only" data-ap="opening">الرصيد الافتتاحي</button>
+      <button class="ap-btn primary owner-only" data-ap="pay">+ تسجيل دفعة</button>
+    </div>
+    <div class="ap-kpis">
+      <div class="ap-kpi"><div class="lbl">الرصيد المستحق</div><div class="val">${apFmt(s.balance)}</div><div class="sub">${escapeHtml(settings.currency||'')}</div></div>
+      <div class="ap-kpi ${s.overdue>0.004?'bad':''}"><div class="lbl">متأخر</div><div class="val">${apFmt(s.overdue)}</div><div class="sub">${openInv.filter(r=>r.daysOver>0).length} فاتورة</div></div>
+      <div class="ap-kpi"><div class="lbl">فواتير آجل لحد التاريخ ده</div><div class="val">${apFmt(s.totalInv)}</div><div class="sub">${s.invoices.length} فاتورة</div></div>
+      <div class="ap-kpi"><div class="lbl">إجمالي المدفوع</div><div class="val">${apFmt(s.totalPaid)}</div><div class="sub">${s.payments.length} دفعة</div></div>
+    </div>
+    <div class="ap-sec"><h4>الفواتير المفتوحة</h4><span class="hint2">${openInv.length} فاتورة عليها مبالغ</span></div>
+    <div class="ap-scroll"><table class="ap-table">
+      <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th class="n">قيمة الفاتورة</th><th class="n">المدفوع</th><th class="n">المتبقي</th><th>الحالة</th></tr></thead>
+      <tbody>${openInv.length ? openInv.map(r=> `<tr><td class="mono">${escapeHtml(r.inv.invoiceNumber||'—')}</td><td>${escapeHtml(r.inv.date||'—')}</td><td>${escapeHtml(r.due||'—')}</td><td class="n">${apFmt(r.total)}</td><td class="n">${apCell(r.paid)}</td><td class="n"><b>${apFmt(r.open)}</b></td><td>${apStatusPill(r)}</td></tr>`).join('')
+        : `<tr><td colspan="7"><div class="ap-empty">كل فواتير المورد ده مدفوعة.</div></td></tr>`}</tbody>
+    </table></div>
+    <div class="ap-sec"><h4>كشف الحساب</h4><span class="hint2">دائن = فواتير علينا للمورد · مدين = مدفوعات للمورد</span></div>
+    <div class="ap-scroll"><table class="ap-table">
+      <thead><tr><th>التاريخ</th><th>البيان</th><th>المرجع</th><th class="n">مدين (مدفوع)</th><th class="n">دائن (فواتير)</th><th class="n">الرصيد</th><th class="owner-only"></th></tr></thead>
+      <tbody>${lines.length ? lines.map(l=> `<tr><td>${escapeHtml(l.date||'—')}</td><td>${escapeHtml(l.desc)}</td><td class="mono">${escapeHtml(l.ref||'')}</td><td class="n">${apCell(l.debit)}</td><td class="n">${apCell(l.credit)}</td><td class="n"><b>${apFmt(l.balance)}</b></td>
+        <td class="owner-only">${l.pay ? `<button class="ap-link danger" data-delpay="${escapeHtml(String(l.pay.id))}">حذف الدفعة</button>` : ''}</td></tr>`).join('')
+        : `<tr><td colspan="7"><div class="ap-empty">مفيش حركات.</div></td></tr>`}</tbody>
+      ${lines.length ? `<tfoot><tr><td colspan="3">الإجمالي</td><td class="n">${apFmt(lines.reduce((t,l)=>t+l.debit,0))}</td><td class="n">${apFmt(lines.reduce((t,l)=>t+l.credit,0))}</td><td class="n">${apFmt(s.balance)}</td><td class="owner-only"></td></tr></tfoot>` : ''}
+    </table></div>`;
+}
+
+// ---------- تسجيل دفعة ----------
+let apPayState = null; // {supplier, rows:[{id, inv, open, due, alloc}]}
+function apSuppliersForPayment(){
+  const set = new Set(invoices.filter(i=> i.store && !apIsCash(i)).map(i=> i.store));
+  apOpening.forEach((o,n)=> set.add(n));
+  return [...set].sort((a,b)=> a.localeCompare(b, 'ar'));
+}
+function apOpenPay(supplier){
+  const sel = apEl('apPaySupplier');
+  const list = apSuppliersForPayment();
+  sel.innerHTML = `<option value="">اختار المورد</option>` + list.map(s=> `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  sel.value = supplier && list.includes(supplier) ? supplier : '';
+  apEl('apPayDate').value = apToday();
+  apEl('apPayAmount').value = '';
+  apEl('apPayMethod').value = 'bank_transfer';
+  apEl('apPayRef').value = ''; apEl('apPayNote').value = '';
+  apEl('apPayErr').textContent = '';
+  apPayLoadInvoices();
+  apEl('apPayOverlay').classList.add('show');
+}
+function apPayLoadInvoices(){
+  const supplier = apEl('apPaySupplier').value;
+  const s = supplier ? apCompute('9999-12-31').get(supplier) : null;
+  apPayState = { supplier, openingLeft: s ? s.openingLeft : 0, rows: s ? s.invoices.filter(r=> r.open > 0.004).map(r=> ({ id: r.inv.id, no: r.inv.invoiceNumber, date: r.inv.date, due: r.due, open: r.open, alloc: 0 })) : [] };
+  apPayRenderAlloc();
+}
+function apPayRenderAlloc(){
+  const st = apPayState;
+  const box = apEl('apPayAlloc');
+  if(!st.supplier){ box.innerHTML = `<div class="ap-empty">اختار المورد الأول</div>`; apPaySummary(); return; }
+  if(!st.rows.length){ box.innerHTML = `<div class="ap-empty">مفيش فواتير مفتوحة للمورد ده. الدفعة هتتسجل ${st.openingLeft>0.004 ? 'على الرصيد الافتتاحي' : 'تحت الحساب (دفعة مقدمة)'}.</div>`; apPaySummary(); return; }
+  box.innerHTML = `<table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th>المتبقي</th><th>يتسدد منها</th></tr></thead><tbody>
+    ${st.rows.map((r,i)=> `<tr><td class="n">${escapeHtml(r.no||'—')}</td><td>${escapeHtml(r.date||'—')}</td><td>${escapeHtml(r.due||'—')}</td><td class="n">${apFmt(r.open)}</td>
+      <td><input data-alloc="${i}" inputmode="decimal" value="${r.alloc ? apR(r.alloc) : ''}" placeholder="0.00"> <button class="ap-link" data-full="${i}">كامل</button></td></tr>`).join('')}
+  </tbody></table>`;
+  apPaySummary();
+}
+function apPayAmount(){ const v = parseFloat(String(apEl('apPayAmount').value).replace(/,/g,'')); return isNaN(v) ? 0 : apR(v); }
+function apPaySummary(){
+  const st = apPayState; const amt = apPayAmount();
+  const used = apR(st.rows.reduce((t,r)=> t + (r.alloc||0), 0));
+  const rest = apR(amt - used);
+  let restLbl = '';
+  if(rest > 0.004) restLbl = st.openingLeft > 0.004 ? `يتسجل على الرصيد الافتتاحي${rest > st.openingLeft + 0.004 ? ' والباقي تحت الحساب' : ''}` : 'يتسجل تحت الحساب (دفعة مقدمة)';
+  apEl('apPaySum').innerHTML = `<span>المبلغ: <b>${apFmt(amt)}</b></span><span>موزع على فواتير: <b>${apFmt(used)}</b></span><span>${rest < -0.004 ? '<span style="color:var(--brick)">الموزع أكبر من المبلغ</span>' : `غير موزع: <b>${apFmt(Math.max(0,rest))}</b> ${restLbl ? '— ' + restLbl : ''}`}</span>`;
+}
+function apPayAutoAllocate(){
+  const st = apPayState; let left = apPayAmount();
+  left = apR(left - Math.min(left, st.openingLeft)); // الرصيد الافتتاحي هو الأقدم
+  st.rows.forEach(r=>{ const a = apR(Math.min(left, r.open)); r.alloc = a > 0 ? a : 0; left = apR(left - r.alloc); });
+  apPayRenderAlloc();
+}
+async function apPaySave(){
+  const st = apPayState; const err = apEl('apPayErr'); err.textContent = '';
+  const amt = apPayAmount();
+  const date = apEl('apPayDate').value;
+  if(!st.supplier) return err.textContent = 'اختار المورد.';
+  if(!(amt > 0)) return err.textContent = 'اكتب مبلغ الدفعة.';
+  if(!date) return err.textContent = 'اكتب تاريخ الدفع.';
+  const allocs = st.rows.filter(r=> r.alloc > 0.004);
+  if(allocs.some(r=> r.alloc > r.open + 0.005)) return err.textContent = 'في فاتورة المبلغ الموزع عليها أكبر من المتبقي منها.';
+  const used = apR(allocs.reduce((t,r)=> t + r.alloc, 0));
+  if(used > amt + 0.005) return err.textContent = 'المبلغ الموزع على الفواتير أكبر من مبلغ الدفعة.';
+  const btn = apEl('apPaySave'); btn.disabled = true; btn.textContent = 'جاري الحفظ...';
+  try{
+    const { data, error } = await sb.from('supplier_payments').insert({
+      workspace_id: currentWorkspace.id, supplier_name: st.supplier, pay_date: date, amount: amt,
+      method: apEl('apPayMethod').value || null, reference: apEl('apPayRef').value.trim() || null, note: apEl('apPayNote').value.trim() || null
+    }).select().single();
+    if(error) throw error;
+    if(allocs.length){
+      const { error: e2 } = await sb.from('payment_allocations').insert(allocs.map(r=> ({ payment_id: data.id, invoice_id: r.id, amount: apR(r.alloc) })));
+      if(e2){ await sb.from('supplier_payments').delete().eq('id', data.id); throw e2; }
+    }
+    apEl('apPayOverlay').classList.remove('show');
+    await apLoad();
+    ap.supplier = st.supplier;
+    apRender();
+  }catch(e){ console.error(e); err.textContent = 'فشل الحفظ: ' + (e.message || e); }
+  finally{ btn.disabled = false; btn.textContent = 'حفظ الدفعة'; }
+}
+async function apDeletePayment(id){
+  const p = apPayments.find(x=> String(x.id) === String(id)); if(!p) return;
+  if(!confirm(`حذف دفعة ${apFmt(p.amount)} بتاريخ ${p.date}؟ الفواتير اللي كانت بتسددها هترجع مفتوحة.`)) return;
+  const { error } = await sb.from('supplier_payments').delete().eq('id', p.id);
+  if(error){ alert('فشل الحذف: ' + error.message); return; }
+  await apLoad(); apRender();
+}
+function apOpenOpening(){
+  const o = apOpening.get(ap.supplier);
+  apEl('apOpenHint').textContent = `المبلغ اللي كان مستحق لـ ${ap.supplier} قبل ما تبدأوا تسجلوا فواتيره على البرنامج. أي دفعة مش موزعة على فواتير بتتخصم منه الأول.`;
+  apEl('apOpenAmount').value = o ? o.amount : '';
+  apEl('apOpenDate').value = o ? o.asOf : (invoices.filter(i=> i.store === ap.supplier && i.date).map(i=> i.date).sort()[0] || apToday());
+  apEl('apOpenErr').textContent = '';
+  apEl('apOpenOverlay').classList.add('show');
+}
+async function apSaveOpening(){
+  const amt = parseFloat(String(apEl('apOpenAmount').value).replace(/,/g,''));
+  const date = apEl('apOpenDate').value;
+  const err = apEl('apOpenErr');
+  if(isNaN(amt) || amt < 0) return err.textContent = 'اكتب مبلغ صحيح (صفر لو مفيش).';
+  if(!date) return err.textContent = 'اكتب التاريخ.';
+  const { error } = amt === 0
+    ? await sb.from('supplier_opening_balances').delete().eq('workspace_id', currentWorkspace.id).eq('supplier_name', ap.supplier)
+    : await sb.from('supplier_opening_balances').upsert({ workspace_id: currentWorkspace.id, supplier_name: ap.supplier, amount: apR(amt), as_of: date, updated_at: new Date().toISOString() });
+  if(error) return err.textContent = 'فشل الحفظ: ' + error.message;
+  apEl('apOpenOverlay').classList.remove('show');
+  await apLoad(); apRender();
+}
+
+// ---------- Excel ----------
+function apExportAging(){
+  const sups = [...apCompute(ap.asOf).values()].filter(s=> Math.abs(s.balance) > 0.004 || s.advance > 0.004).sort((a,b)=> b.balance - a.balance);
+  const aging = sups.map(s=> ({ 'المورد': s.name, 'الرصيد': apR(s.balance), 'لم يستحق': apR(s.buckets[0]), '1-30': apR(s.buckets[1]), '31-60': apR(s.buckets[2]), '61-90': apR(s.buckets[3]), 'أكثر من 90': apR(s.buckets[4]), 'دفعات تحت الحساب': apR(s.advance), 'مدة الائتمان (يوم)': apCreditDays(s.name) ?? '', 'آخر دفعة': s.lastPay ? s.lastPay.date : '' }));
+  const open = [];
+  sups.forEach(s=> s.invoices.filter(r=> r.open > 0.004).forEach(r=> open.push({ 'المورد': s.name, 'رقم الفاتورة': r.inv.invoiceNumber || '', 'تاريخ الفاتورة': r.inv.date || '', 'تاريخ الاستحقاق': r.due || '', 'أيام التأخير': Math.max(0, r.daysOver), 'قيمة الفاتورة': r.total, 'المدفوع': apR(r.paid), 'المتبقي': r.open })));
+  const pays = apPayments.filter(p=> p.date <= ap.asOf).map(p=> ({ 'التاريخ': p.date, 'المورد': p.supplier, 'المبلغ': p.amount, 'الطريقة': AP_METHODS[p.method] || '', 'المرجع': p.reference, 'ملاحظة': p.note, 'موزع على فواتير': apR(p.allocs.reduce((t,a)=> t + a.amount, 0)) }));
+  const wb = XLSX.utils.book_new();
+  const add = (rows, name)=>{ const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '': 'لا توجد بيانات' }]); ws['!views'] = [{ RTL: true }]; XLSX.utils.book_append_sheet(wb, ws, name); };
+  add(aging, 'أعمار الديون'); add(open, 'الفواتير المفتوحة'); add(pays, 'المدفوعات');
+  XLSX.writeFile(wb, `مديونية-الموردين-${ap.asOf}.xlsx`);
+}
+function apExportLedger(){
+  const s = apCompute(ap.asOf).get(ap.supplier); if(!s) return;
+  const rows = apLedger(s).map(l=> ({ 'التاريخ': l.date, 'البيان': l.desc, 'المرجع': l.ref, 'مدين (مدفوع)': apR(l.debit), 'دائن (فواتير)': apR(l.credit), 'الرصيد': l.balance }));
+  const ws = XLSX.utils.json_to_sheet(rows); ws['!views'] = [{ RTL: true }];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'كشف حساب');
+  XLSX.writeFile(wb, `كشف-حساب-${ap.supplier.replace(/[\\/:*?"<>|]/g,'')}-${ap.asOf}.xlsx`);
+}
+
+// ---------- الأحداث ----------
+(function apWire(){
+  const root = apEl('apRoot');
+  root.addEventListener('click', (e)=>{
+    const t = e.target.closest('[data-ap],[data-sup],[data-delpay],#apExportAging,#apExportLedger');
+    if(!t) return;
+    if(t.id === 'apExportAging') return apExportAging();
+    if(t.id === 'apExportLedger') return apExportLedger();
+    if(t.dataset.delpay) return apDeletePayment(t.dataset.delpay);
+    if(t.dataset.sup){ ap.supplier = t.dataset.sup; apRender(); window.scrollTo({ top: root.getBoundingClientRect().top + scrollY - 20, behavior:'smooth' }); return; }
+    const a = t.dataset.ap;
+    if(a === 'back'){ ap.supplier = ''; apRender(); }
+    else if(a === 'pay') apOpenPay(ap.supplier);
+    else if(a === 'opening') apOpenOpening();
+  });
+  root.addEventListener('change', (e)=>{
+    if(e.target.id === 'apAsOf'){ ap.asOf = e.target.value || apToday(); apRender(); }
+    if(e.target.id === 'apShowZero'){ ap.showZero = e.target.checked; apRender(); }
+  });
+  apEl('apPaySupplier').addEventListener('change', apPayLoadInvoices);
+  apEl('apPayAmount').addEventListener('input', apPaySummary);
+  apEl('apPayAuto').addEventListener('click', apPayAutoAllocate);
+  apEl('apPayAlloc').addEventListener('input', (e)=>{
+    const i = e.target.dataset.alloc; if(i === undefined) return;
+    const v = parseFloat(String(e.target.value).replace(/,/g,'')); apPayState.rows[Number(i)].alloc = isNaN(v) ? 0 : apR(v); apPaySummary();
+  });
+  apEl('apPayAlloc').addEventListener('click', (e)=>{
+    const i = e.target.dataset.full; if(i === undefined) return;
+    const r = apPayState.rows[Number(i)]; r.alloc = r.open;
+    if(!(apPayAmount() > 0)) apEl('apPayAmount').value = apR(apPayState.rows.reduce((t,x)=> t + (x.alloc||0), 0));
+    apPayRenderAlloc();
+  });
+  apEl('apPaySave').addEventListener('click', apPaySave);
+  ['apPayClose','apPayCancel'].forEach(id=> apEl(id).addEventListener('click', ()=> apEl('apPayOverlay').classList.remove('show')));
+  apEl('apOpenSave').addEventListener('click', apSaveOpening);
+  ['apOpenClose','apOpenCancel'].forEach(id=> apEl(id).addEventListener('click', ()=> apEl('apOpenOverlay').classList.remove('show')));
+})();
+els.tabPayablesBtn = document.getElementById('tabPayablesBtn');
+els.payablesView = document.getElementById('payablesView');
+TAB_VIEWS.push({ btn: 'tabPayablesBtn', view: 'payablesView' });
+els.tabPayablesBtn.addEventListener('click', ()=> switchTab('tabPayablesBtn', apRender));
+/* ==== PAYABLES JS END ==== */
+
 
 // ---------- init ----------
 const { data: { session: existingSession } } = await sb.auth.getSession();
