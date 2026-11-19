@@ -604,6 +604,11 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     <button class="modal-close" id="closeImportBtn">×</button>
     <h2>استيراد بيانات</h2>
     <p class="hint">لو الشبكة عندك بتمنع التحليل التلقائي للصور، ابعتلي صور الفواتير في المحادثة عشان أقرأها وأجهزلك البيانات، وبعدين الصق الناتج هنا. الصيغة المطلوبة: مصفوفة JSON فيها فاتورة أو أكتر، كل فاتورة فيها متجر وتاريخ وأصناف.</p>
+    <div style="margin-bottom:12px;padding:12px;border:1px dashed var(--line);border-radius:4px;background:var(--paper-raised);">
+      <strong>رفع ملف Excel</strong>
+      <p class="hint" style="margin:4px 0 8px;">اختر ملف Excel (الشيت الأول: المورد، التاريخ، رقم الفاتورة، نوع الدفع، نسبة الضريبة، الصنف، الباركود، الكمية، الوحدة، السعر، الوجهة). هيتقرأ ويتحول تلقائياً، وبعدها اضغط "استيراد".</p>
+      <input type="file" id="importXlsxInput" accept=".xlsx,.xls,.csv">
+    </div>
     <textarea id="importTextarea" rows="10" style="width:100%;font-family:'JetBrains Mono',monospace;font-size:12px;direction:ltr;text-align:left;padding:10px;border:1px solid var(--line);border-radius:3px;background:var(--paper-raised);" placeholder='[
   {
     "store": "اسم المورد",
@@ -1529,7 +1534,11 @@ els.confirmMergeEditBtn.addEventListener('click', async ()=>{
     unit: tr.querySelector('.mergeUnitInput').value.trim() || null
   })).filter(u => u.id && !isNaN(u.price));
 
-  if(updates.length === 0){ els.mergeEditStatus.innerHTML = `<div class="error-box">مفيش صفوف صالحة للحفظ.</div>`; return; }
+  if(updates.length === 0){
+    const noIds = rows.some(tr => !tr.dataset.id);
+    els.mergeEditStatus.innerHTML = `<div class="error-box">${noIds ? 'الأصناف دي اتضافت من شوية ولسه مش متحدّثة من السيرفر — اقفل النافذة، حدّث الصفحة (F5) وجرّب تاني.' : 'مفيش صفوف صالحة للحفظ.'}</div>`;
+    return;
+  }
 
   els.confirmMergeEditBtn.disabled = true;
   els.mergeEditStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الحفظ...</div>`;
@@ -2596,6 +2605,7 @@ els.saveInvoiceBtn.addEventListener('click', async ()=>{
     return;
   }
   closeAddModal();
+  await refreshInvoicesFromServer();
   renderAll();
   let msg = `تم حفظ ${savedCount} فاتورة.`;
   if(skippedCount > 0) msg += ` اتجوهل ${skippedCount} فاتورة فاضية.`;
@@ -2625,6 +2635,80 @@ els.closeImportBtn.addEventListener('click', closeImportModal);
 els.cancelImportBtn.addEventListener('click', closeImportModal);
 els.importOverlay.addEventListener('click', (e)=>{ if(e.target===els.importOverlay) closeImportModal(); });
 
+// ---- Excel -> JSON (يملأ مربع النص بنفس صيغة JSON ويستخدم نفس زر الاستيراد) ----
+function xlsxDateToISO(v){
+  if(v instanceof Date && !isNaN(v)){
+    const y=v.getFullYear(), m=String(v.getMonth()+1).padStart(2,'0'), d=String(v.getDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  }
+  if(typeof v === 'number' && v > 20000){
+    const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return dt.toISOString().slice(0,10);
+  }
+  const s = (v==null?'':String(v)).trim();
+  let m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+  if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return s;
+}
+function xlsxRowsToInvoices(rows){
+  const pick = (r, ...names)=>{
+    for(const k of Object.keys(r)){
+      const kk = k.toString().trim();
+      if(names.some(n=> kk === n || kk.startsWith(n))) return r[k];
+    }
+    return '';
+  };
+  const map = new Map();
+  for(const r of rows){
+    const store = (pick(r,'المورد')||'').toString().trim();
+    const name = (pick(r,'الصنف')||'').toString().trim();
+    if(!store || !name) continue;
+    const date = xlsxDateToISO(pick(r,'التاريخ'));
+    const invNo = (pick(r,'رقم الفاتورة')||'').toString().trim();
+    const payRaw = (pick(r,'نوع الدفع')||'').toString().trim();
+    const paymentType = (payRaw==='آجل' || /credit|كريديت/i.test(payRaw)) ? 'credit' : ((payRaw==='نقدي' || payRaw==='كاش' || /cash/i.test(payRaw)) ? 'cash' : '');
+    const vatRaw = pick(r,'نسبة الضريبة');
+    const key = [store, date, invNo].join('||');
+    if(!map.has(key)) map.set(key, { store, date, invoiceNumber: invNo, paymentType, vatRate: (vatRaw===''?5:parseFloat(vatRaw)), items: [] });
+    map.get(key).items.push({
+      name,
+      barcode: (pick(r,'الباركود')||'').toString().trim(),
+      price: parseFloat(pick(r,'السعر')),
+      qty: parseFloat(pick(r,'الكمية')) || 1,
+      unit: (pick(r,'الوحدة')||'').toString().trim(),
+      destination: (pick(r,'الوجهة')||'').toString().trim()
+    });
+  }
+  return Array.from(map.values());
+}
+const importXlsxInput = document.getElementById('importXlsxInput');
+if(importXlsxInput){
+  importXlsxInput.addEventListener('change', async (e)=>{
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    try{
+      if(typeof XLSX === 'undefined') throw new Error('مكتبة Excel لم تُحمّل — تأكد من الاتصال بالإنترنت');
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, { type:'array', cellDates:true });
+      const sheetName = wb.SheetNames.includes('فواتير للرفع') ? 'فواتير للرفع' : wb.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval:'', raw:true });
+      const list = xlsxRowsToInvoices(rows);
+      if(list.length === 0){
+        els.importStatus.innerHTML = `<div class="error-box">مفيش فواتير اتقرأت من الملف. تأكد إن الشيت الأول فيه أعمدة المورد والصنف والسعر.</div>`;
+        return;
+      }
+      els.importTextarea.value = JSON.stringify(list, null, 1);
+      const itemsCount = list.reduce((s,x)=>s+x.items.length,0);
+      els.importStatus.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرأ ${list.length} فاتورة (${itemsCount} صنف) من الملف "${escapeHtml(f.name)}". اضغط "استيراد" للحفظ.</div>`;
+    }catch(err){
+      console.error(err);
+      els.importStatus.innerHTML = `<div class="error-box">تعذر قراءة الملف: ${escapeHtml(err.message||String(err))}</div>`;
+    }
+  });
+}
+
 els.doImportBtn.addEventListener('click', async ()=>{
   const raw = els.importTextarea.value.trim();
   if(!raw){
@@ -2641,7 +2725,7 @@ els.doImportBtn.addEventListener('click', async ()=>{
   const list = Array.isArray(parsed) ? parsed : [parsed];
   els.doImportBtn.disabled = true;
   els.importStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الاستيراد...</div>`;
-  let addedInvoices = 0, addedItems = 0, skipped = 0, failed = 0;
+  let addedInvoices = 0, addedItems = 0, skipped = 0, failed = 0, duplicates = 0;
   for(const inv of list){
     const items = (inv.items||[]).map(it=>({
       name: (it.name||'').toString().trim(),
@@ -2656,9 +2740,18 @@ els.doImportBtn.addEventListener('click', async ()=>{
     const date = (inv.date||'').toString().trim();
     const vatRate = (typeof inv.vatRate === 'number' ? inv.vatRate : parseFloat(inv.vatRate));
     const finalVat = isNaN(vatRate) ? 5 : vatRate;
+    const invoiceNumber = (inv.invoiceNumber||'').toString().trim();
+    const paymentType = (inv.paymentType === 'cash' || inv.paymentType === 'credit') ? inv.paymentType : '';
+    if(invoiceNumber){
+      const norm = normalizeInvoiceNumber(invoiceNumber);
+      if(invoices.some(x=> x.store === store && x.invoiceNumber && normalizeInvoiceNumber(x.invoiceNumber) === norm)){
+        duplicates++;
+        continue;
+      }
+    }
     try{
-      const newId = await insertInvoiceRemote(store, date, items, finalVat);
-      invoices.push({ id: newId, store, date, vatRate: finalVat, items });
+      const newId = await insertInvoiceRemote(store, date, items, finalVat, invoiceNumber, paymentType);
+      invoices.push({ id: newId, store, date, vatRate: finalVat, invoiceNumber, paymentType, items });
       addedInvoices++;
       addedItems += items.length;
     }catch(e){
@@ -2668,13 +2761,19 @@ els.doImportBtn.addEventListener('click', async ()=>{
   }
   els.doImportBtn.disabled = false;
 
+  if(addedInvoices === 0 && duplicates > 0 && failed === 0){
+    els.importStatus.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">كل الفواتير (${duplicates}) موجودة قبل كده بنفس رقم الفاتورة لنفس المورد — محصلش تكرار.</div>`;
+    return;
+  }
   if(addedInvoices === 0){
     els.importStatus.innerHTML = `<div class="error-box">محصلش استيراد حاجة. تأكد إن كل فاتورة فيها أصناف بأسماء وأسعار، وإنك متصل بالإنترنت.</div>`;
     return;
   }
+  await refreshInvoicesFromServer();
   renderAll();
   let msg = `✓ تم استيراد ${addedInvoices} فاتورة (${addedItems} صنف)`;
   if(skipped) msg += ` — تم تجاهل ${skipped} فاتورة فاضية`;
+  if(duplicates) msg += ` — تم تخطي ${duplicates} فاتورة موجودة قبل كده (نفس الرقم ونفس المورد)`;
   if(failed) msg += ` — فشل حفظ ${failed} فاتورة`;
   els.importStatus.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">${msg}</div>`;
   els.importTextarea.value = '';
