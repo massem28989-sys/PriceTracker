@@ -2142,10 +2142,10 @@ function renderSettlement(){
           return `<tr>
           <td class="mono" style="padding:8px 4px;">${escapeHtml(r.invoiceNumber||'—')}</td>
           <td style="padding:8px 4px;">${escapeHtml(r.date||'—')}</td>
-          <td class="mono" style="padding:8px 4px;">${fmtPrice(r.subtotal)}</td>
+          <td class="mono" style="padding:8px 4px;">${apFmt(r.subtotal)}</td>
           <td class="mono" style="padding:8px 4px;">${fmtPrice(r.vatRate)}%</td>
-          <td class="mono" style="padding:8px 4px;">${fmtPrice(r.vat)}</td>
-          <td class="mono" style="padding:8px 4px;">${fmtPrice(r.total)}</td>
+          <td class="mono" style="padding:8px 4px;">${apFmt(r.vat)}</td>
+          <td class="mono" style="padding:8px 4px;">${apFmt(r.total)}</td>
           ${anyCredit ? `<td style="padding:8px 4px;">${r.paymentType ? (r.paymentType==='cash'?'كاش':'كريديت') : '—'}</td><td class="mono" style="padding:8px 4px;${overdue?'color:var(--brick);font-weight:600;':''}">${escapeHtml(dueDate||'—')}${overdue?' ⚠':''}</td>` : ''}
         </tr>`;
         }).join('')}
@@ -2153,10 +2153,10 @@ function renderSettlement(){
       <tfoot>
         <tr style="font-weight:700;border-top:2px solid var(--ink);">
           <td colspan="2" style="padding:10px 4px;">الإجمالي الكلي</td>
-          <td class="mono" style="padding:10px 4px;">${fmtPrice(grandSubtotal)}</td>
+          <td class="mono" style="padding:10px 4px;">${apFmt(grandSubtotal)}</td>
           <td></td>
-          <td class="mono" style="padding:10px 4px;">${fmtPrice(grandVat)}</td>
-          <td class="mono" style="padding:10px 4px;">${fmtPrice(grandTotal)} ${escapeHtml(settings.currency)}</td>
+          <td class="mono" style="padding:10px 4px;">${apFmt(grandVat)}</td>
+          <td class="mono" style="padding:10px 4px;">${apFmt(grandTotal)} ${escapeHtml(settings.currency)}</td>
           ${anyCredit?'<td></td><td></td>':''}
         </tr>
       </tfoot>
@@ -2249,6 +2249,7 @@ async function extractStatementData(images){
     throw new Error(data && data.error ? data.error : 'رد غير متوقع من الخادم');
   }
   return {
+    docType: data.docType || '',
     supplier: data.supplier || '',
     asOfDate: data.asOfDate || '',
     items: (data.items||[]).map(it=>({
@@ -2314,9 +2315,9 @@ function renderStatementComparison(rows){
         ${rows.map(r=> `<tr>
           <td class="mono" style="padding:8px 4px;">${escapeHtml(r.invoiceNumber||'—')}</td>
           <td style="padding:8px 4px;">${escapeHtml(r.date||'—')}</td>
-          <td class="mono" style="padding:8px 4px;">${(r.total!==null&&r.total!==undefined)?fmtPrice(r.total):'—'}</td>
-          <td class="mono" style="padding:8px 4px;">${(r.ourTotal!==null&&r.ourTotal!==undefined)?fmtPrice(r.ourTotal):'—'}</td>
-          <td class="mono" style="padding:8px 4px;">${(r.diff!==null&&r.diff!==undefined&&Math.abs(r.diff)>=0.5)?fmtPrice(r.diff):'—'}</td>
+          <td class="mono" style="padding:8px 4px;">${(r.total!==null&&r.total!==undefined)?apFmt(r.total):'—'}</td>
+          <td class="mono" style="padding:8px 4px;">${(r.ourTotal!==null&&r.ourTotal!==undefined)?apFmt(r.ourTotal):'—'}</td>
+          <td class="mono" style="padding:8px 4px;">${(r.diff!==null&&r.diff!==undefined&&Math.abs(r.diff)>=0.5)?apFmt(r.diff):'—'}</td>
           <td style="padding:8px 4px;">${statusLabel[r.status]}${matchByNote[r.matchedBy]||''}</td>
         </tr>`).join('')}
       </tbody>
@@ -2341,12 +2342,42 @@ els.statementFileInput.addEventListener('change', async ()=>{
     else images = [await fileToBase64(file)];
     els.statementStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري التحليل والمطابقة...</div>`;
     const extracted = await extractStatementData(images);
-    const compared = compareStatementToRecords(extracted.items, supplier, els.settlementFromDate.value || '', els.settlementToDate.value || '');
+    const items = extracted.items || [];
+    // 1) المستند فاتورة مش كشف حساب
+    const looksLikeInvoice = extracted.docType === 'invoice' || (!extracted.docType && items.length === 1 && !extracted.asOfDate);
+    if(looksLikeInvoice){
+      const it = items[0] || {};
+      const exists = it.invoiceNumber && invoices.some(inv=> inv.invoiceNumber && normalizeInvoiceNumber(inv.invoiceNumber) === normalizeInvoiceNumber(it.invoiceNumber));
+      els.statementStatus.innerHTML = `<div class="error-box">الملف ده <b>فاتورة ضريبية</b> مش كشف حساب${it.invoiceNumber ? ` (فاتورة رقم ${escapeHtml(it.invoiceNumber)}${it.date ? ' بتاريخ ' + escapeHtml(it.date) : ''}${it.total ? ' بإجمالي ' + apFmt(it.total) : ''})` : ''}.<br>
+        كشف الحساب هو المستند اللي المورد بيبعته وفيه قايمة كل فواتيرك عنده (Statement of Account).<br>
+        ${exists ? 'الفاتورة دي متسجلة عندك بالفعل.' : 'الفاتورة دي <b>مش متسجلة عندك</b> — سجّلها من زرار "+ إضافة فواتير".'}</div>`;
+      els.statementFileInput.value = '';
+      return;
+    }
+    // 2) المورد في الكشف غير المورد المختار
+    let supplierWarn = '';
+    if(extracted.supplier && typeof ixSupKey === 'function'){
+      const a = ixSupKey(extracted.supplier), b = ixSupKey(supplier);
+      const sim = a && b ? 1 - levenshtein(a, b) / Math.max(a.length, b.length) : 1;
+      if(sim < 0.6 && !(a.includes(b) || b.includes(a))) supplierWarn = `<div class="error-box" style="margin-bottom:8px;">انتبه: الكشف ده باسم "${escapeHtml(extracted.supplier)}" وانت مختار "${escapeHtml(supplier)}". اتأكد إنك اخترت المورد الصح.</div>`;
+    }
+    // 3) المقارنة في فترة الكشف بس (لو مفيش فترة محددة يدويًا)
+    let from = els.settlementFromDate.value || '', to = els.settlementToDate.value || '';
+    const sDates = items.map(i=> i.date).filter(Boolean).sort();
+    let periodNote = '';
+    if(!from && !to && sDates.length){
+      from = sDates[0]; to = extracted.asOfDate && extracted.asOfDate > sDates[sDates.length-1] ? extracted.asOfDate : sDates[sDates.length-1];
+      periodNote = ` · المقارنة على فترة الكشف من ${from} إلى ${to}`;
+    }
+    const compared = compareStatementToRecords(items, supplier, from, to);
     renderStatementComparison(compared);
     const issues = compared.filter(r=> r.status !== 'match').length;
-    els.statementStatus.innerHTML = issues === 0
-      ? `<div class="status-line" style="color:var(--pine-deep);">✓ كل حاجة متطابقة (${compared.length} فاتورة)</div>`
-      : `<div class="status-line" style="color:var(--brick);">⚠ فيه ${issues} فاتورة محتاجة مراجعة من أصل ${compared.length}</div>`;
+    const stmtTotal = items.reduce((t,i)=> t + (Number(i.total)||0), 0);
+    const ourTotal = compared.reduce((t,r)=> t + (r.ourTotal||0), 0);
+    els.statementStatus.innerHTML = supplierWarn + (issues === 0
+      ? `<div class="status-line" style="color:var(--pine-deep);">✓ كل حاجة متطابقة (${compared.length} فاتورة)${periodNote}</div>`
+      : `<div class="status-line" style="color:var(--brick);">⚠ فيه ${issues} فاتورة محتاجة مراجعة من أصل ${compared.length}${periodNote}</div>`)
+      + `<div class="status-line" style="font-size:13px;">إجمالي الكشف: <b class="mono">${apFmt(stmtTotal)}</b> · إجمالي عندنا لنفس الفترة: <b class="mono">${apFmt(ourTotal)}</b> · الفرق: <b class="mono">${apFmt(ourTotal - stmtTotal)}</b></div>`;
   }catch(e){
     console.error(e);
     els.statementStatus.innerHTML = `<div class="error-box">فشل التحليل: ${escapeHtml(e.message || String(e))}</div>`;
