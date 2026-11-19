@@ -694,7 +694,8 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   <div class="modal">
     <button class="modal-close" id="closeSupplierMergeBtn">×</button>
     <h2>دمج موردين متكررين</h2>
-    <p class="hint">حدد الأسماء اللي هي في الحقيقة نفس المورد، واكتب الاسم النهائي اللي عايزه.</p>
+    <div id="supplierMergeSuggest"></div>
+    <p class="hint" id="supplierMergeManualHint">أو حدد الأسماء بنفسك، واكتب الاسم النهائي اللي عايزه.</p>
     <div id="supplierMergeList" style="max-height:300px;overflow-y:auto;margin-bottom:14px;"></div>
     <div class="field" style="margin-bottom:14px;">
       <label>الاسم النهائي</label>
@@ -1834,6 +1835,127 @@ els.confirmMergeEditBtn.addEventListener('click', async ()=>{
 
 // ---------- merge duplicate suppliers ----------
 const UNNAMED_SUPPLIER_LABEL = '(بدون اسم)';
+// ---------- دمج موردين: الفواتير + الدفعات + الرصيد الافتتاحي + الإعدادات ----------
+async function mergeSuppliers(names, finalName){
+  const named = names.filter(n => n !== UNNAMED_SUPPLIER_LABEL && n !== finalName);
+  const hasUnnamed = names.includes(UNNAMED_SUPPLIER_LABEL);
+  if(named.length){
+    const { error } = await sb.from('invoices').update({ store: finalName }).eq('workspace_id', currentWorkspace.id).in('store', named);
+    if(error) throw error;
+    if(!apSchemaMissing){
+      const r1 = await sb.from('supplier_payments').update({ supplier_name: finalName }).eq('workspace_id', currentWorkspace.id).in('supplier_name', named);
+      if(r1.error && !/relation|does not exist|schema cache/i.test(r1.error.message||'')) throw r1.error;
+      // الرصيد الافتتاحي: يتجمع على الاسم النهائي بأقدم تاريخ
+      const all = [finalName, ...named].map(n=> ({ n, o: apOpening.get(n) })).filter(x=> x.o);
+      if(all.length && (all.length > 1 || all[0].n !== finalName)){
+        const amount = all.reduce((t,x)=> t + x.o.amount, 0);
+        const asOf = all.map(x=> x.o.asOf).sort()[0];
+        await sb.from('supplier_opening_balances').delete().eq('workspace_id', currentWorkspace.id).in('supplier_name', all.map(x=> x.n));
+        const r2 = await sb.from('supplier_opening_balances').insert({ workspace_id: currentWorkspace.id, supplier_name: finalName, amount: Math.round(amount*100)/100, as_of: asOf });
+        if(r2.error) throw r2.error;
+      }
+    }
+    // إعدادات المورد (الجهة/الضريبة/الدفع): لو الاسم النهائي مالوش إعدادات ياخد إعدادات أول اسم ليه
+    const hasSettings = (n)=> supplierDestinationsMap.has(n) || supplierVatRatesMap.has(n) || supplierPaymentMap.has(n);
+    if(!hasSettings(finalName)){
+      const src = named.find(hasSettings);
+      if(src){
+        const pay = supplierPaymentMap.get(src) || {};
+        await saveSupplierSettings(finalName, supplierDestinationsMap.get(src) || '', supplierVatRatesMap.has(src) ? supplierVatRatesMap.get(src) : null, pay.type || null, pay.creditDays ?? null);
+      }
+    }
+    for(const n of named){ if(hasSettings(n)) await saveSupplierSettings(n, '', null, null, null); }
+  }
+  if(hasUnnamed){
+    const { error } = await sb.from('invoices').update({ store: finalName }).eq('workspace_id', currentWorkspace.id).is('store', null);
+    if(error) throw error;
+  }
+}
+
+// ---------- اقتراح الموردين المتكررين تلقائيًا ----------
+function supplierGroupTokens(name){
+  return (name||'').toUpperCase()
+    .replace(/FOOD\s*STUFFS?/g,'FOODSTUFF').replace(/INDUSTRIES/g,'INDUSTRY').replace(/L\.\s?L\.\s?C\.?/g,' LLC ')
+    .replace(/[^A-Z0-9؀-ۿ]+/g,' ')
+    .split(' ').filter(t=> t && !['LLC','CO','COMPANY','TRADING','TR','TRD','SPS','SP','SOLE','PROPRIETORSHIP','PROPRIATORSHIP','PROPRIETOR','FZCO','FZE','FZ','EST','ESTABLISHMENT','THE','AND','OPC','PJSC','P','J','S','C'].includes(t));
+}
+function suppliersLookSame(a, b){
+  const ta = supplierGroupTokens(a), tb = supplierGroupTokens(b);
+  if(!ta.length || !tb.length) return false;
+  const ja = ta.join(' '), jb = tb.join(' ');
+  if(ja === jb) return true;
+  const sim = 1 - levenshtein(ja, jb) / Math.max(ja.length, jb.length);
+  if(sim >= 0.88) return true;
+  const A = new Set(ta), B = new Set(tb);
+  const [small, big] = A.size <= B.size ? [A, B] : [B, A];
+  const inter = [...small].filter(t=> big.has(t)).length;
+  return small.size >= 2 && inter === small.size && inter / big.size >= 0.6;
+}
+let supplierMergeDismissed = new Set();
+function findSupplierDuplicateGroups(counts){
+  const names = [...counts.keys()].filter(n=> n !== UNNAMED_SUPPLIER_LABEL);
+  const parent = names.map((_,i)=> i);
+  const find = (i)=> parent[i] === i ? i : (parent[i] = find(parent[i]));
+  for(let i=0;i<names.length;i++) for(let j=i+1;j<names.length;j++){
+    if(suppliersLookSame(names[i], names[j])) parent[find(i)] = find(j);
+  }
+  const groups = new Map();
+  names.forEach((n,i)=>{ const r = find(i); if(!groups.has(r)) groups.set(r, []); groups.get(r).push(n); });
+  return [...groups.values()].filter(g=> g.length > 1)
+    .map(g=> g.sort((a,b)=> (counts.get(b)||0) - (counts.get(a)||0)))
+    .filter(g=> !supplierMergeDismissed.has(g.slice().sort().join('|')));
+}
+function renderSupplierMergeSuggestions(counts){
+  const box = document.getElementById('supplierMergeSuggest');
+  const groups = findSupplierDuplicateGroups(counts);
+  if(!groups.length){ box.innerHTML = `<div class="status-line" style="color:var(--pine-deep);margin-bottom:10px;">✓ مفيش أسماء موردين متكررة واضحة.</div>`; return; }
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+      <b style="font-size:14px;">لقيت ${groups.length} مورد مكتوب بأكتر من اسم</b>
+      <button class="btn btn-primary" id="mergeAllSuggestedBtn" style="padding:7px 14px;font-size:13px;background:var(--pine-deep);color:var(--white);">دمج الكل</button>
+    </div>
+    <p class="hint" style="margin-top:0;">اختار الاسم اللي يفضل لكل مورد. الدمج بينقل الفواتير والدفعات والرصيد الافتتاحي والإعدادات للاسم ده.</p>
+    <div style="max-height:300px;overflow-y:auto;margin-bottom:12px;">
+    ${groups.map((g,gi)=> `<div class="draft-card supMergeGroup" data-g="${gi}" style="padding:10px 12px;margin-bottom:8px;">
+      ${g.map((n,k)=> `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;">
+        <input type="radio" name="supg${gi}" value="${escapeHtml(n)}" ${k===0?'checked':''}>
+        <span style="flex:1;" dir="auto">${escapeHtml(n)}</span>
+        <span style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">${counts.get(n)||0} فاتورة</span></label>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button class="btn btn-ghost supMergeOne" data-g="${gi}" style="padding:5px 12px;font-size:12px;">دمج</button>
+        <button class="btn-danger-text supMergeNo" data-g="${gi}" style="font-size:12px;">مش نفس المورد</button>
+      </div>
+    </div>`).join('')}
+    </div>`;
+  box._groups = groups;
+}
+document.getElementById('supplierMergeSuggest').addEventListener('click', async (e)=>{
+  const box = e.currentTarget;
+  const groups = box._groups || [];
+  const pick = (gi)=>{ const r = box.querySelector(`input[name="supg${gi}"]:checked`); return r ? r.value : groups[gi][0]; };
+  const run = async (list)=>{
+    els.supplierMergeStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الدمج...</div>`;
+    try{
+      for(const gi of list) await mergeSuppliers(groups[gi], pick(gi));
+      await loadSupplierDestinations();
+      await refreshInvoicesFromServer();
+      renderAll();
+      openSupplierMergeModal();
+      els.supplierMergeStatus.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتدمج ${list.length} مورد</div>`;
+    }catch(err){
+      console.error(err);
+      els.supplierMergeStatus.innerHTML = `<div class="error-box">فشل الدمج: ${escapeHtml(err.message || String(err))}</div>`;
+    }
+  };
+  if(e.target.id === 'mergeAllSuggestedBtn'){
+    if(!confirm(`دمج ${groups.length} مورد مرة واحدة؟`)) return;
+    return run(groups.map((_,i)=> i));
+  }
+  const one = e.target.closest('.supMergeOne'); if(one) return run([Number(one.dataset.g)]);
+  const no = e.target.closest('.supMergeNo');
+  if(no){ supplierMergeDismissed.add(groups[Number(no.dataset.g)].slice().sort().join('|')); openSupplierMergeModal(); }
+});
+
 function openSupplierMergeModal(){
   const counts = new Map();
   invoices.forEach(inv=>{
@@ -1849,6 +1971,7 @@ function openSupplierMergeModal(){
     </label>`).join('') || `<div class="empty-state">مفيش موردين مسجّلين لسه.</div>`;
   els.supplierMergeFinalName.value = '';
   els.supplierMergeStatus.innerHTML = '';
+  renderSupplierMergeSuggestions(counts);
   els.supplierMergeOverlay.classList.add('show');
 }
 els.mergeSuppliersBtn.addEventListener('click', openSupplierMergeModal);
@@ -1924,27 +2047,12 @@ els.confirmSupplierMergeBtn.addEventListener('click', async ()=>{
   const finalName = els.supplierMergeFinalName.value.trim();
   if(!finalName){ els.supplierMergeStatus.innerHTML = `<div class="error-box">اكتب الاسم النهائي.</div>`; return; }
 
-  const namedChecked = checked.filter(n => n !== UNNAMED_SUPPLIER_LABEL);
-  const hasUnnamed = checked.includes(UNNAMED_SUPPLIER_LABEL);
-
   els.confirmSupplierMergeBtn.disabled = true;
   els.supplierMergeStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الدمج...</div>`;
   try{
-    if(namedChecked.length){
-      const { error } = await sb.from('invoices')
-        .update({ store: finalName })
-        .eq('workspace_id', currentWorkspace.id)
-        .in('store', namedChecked);
-      if(error) throw error;
-    }
-    if(hasUnnamed){
-      const { error } = await sb.from('invoices')
-        .update({ store: finalName })
-        .eq('workspace_id', currentWorkspace.id)
-        .is('store', null);
-      if(error) throw error;
-    }
+    await mergeSuppliers(checked, finalName);
     closeSupplierMergeModal();
+    await loadSupplierDestinations();
     await refreshInvoicesFromServer();
     renderAll();
   }catch(e){
