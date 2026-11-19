@@ -2400,8 +2400,22 @@ function compareStatementToRecords(statementItems, supplierName, fromDate, toDat
     return { invoiceNumber: stmt.invoiceNumber, date: stmt.date, total: stmt.total, ourTotal: ourMatch ? ourMatch.total : null, diff, status, matchedBy };
   });
 
+  // فواتير الكشف اللي مش عندنا: يمكن متسجلة باسم مورد تاني
+  results.forEach(r=>{
+    if(r.status !== 'missing_in_app' || !r.invoiceNumber) return;
+    const key = normalizeInvoiceNumber(r.invoiceNumber);
+    const other = invoices.find(inv=> inv.store !== supplierName && inv.invoiceNumber && normalizeInvoiceNumber(inv.invoiceNumber) === key);
+    if(other){
+      const row = computeSettlementRows(other.store, '', '').find(x=> x.id === other.id);
+      r.status = 'other_supplier'; r.otherStore = other.store;
+      r.ourTotal = row ? row.total : null; r.diff = row ? row.total - r.total : null;
+    }
+  });
+  // فواتير عندنا مش في الكشف: يمكن تكون نفس فاتورة متسجلة مرتين
+  const matchedKeys = new Set(results.filter(r=> r.status==='match' || r.status==='mismatch').map(r=> normalizeInvoiceNumber(r.invoiceNumber||'')));
   const extraOurRows = ourRows.filter(r => !matchedOurIds.has(r.id)).map(r=> ({
-    invoiceNumber: r.invoiceNumber, date: r.date, total: null, ourTotal: r.total, diff: null, status: 'missing_in_statement', matchedBy: ''
+    invoiceNumber: r.invoiceNumber, date: r.date, total: null, ourTotal: r.total, diff: null,
+    status: (r.invoiceNumber && matchedKeys.has(normalizeInvoiceNumber(r.invoiceNumber))) ? 'duplicate_in_app' : 'missing_in_statement', matchedBy: ''
   }));
 
   return [...results, ...extraOurRows].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -2413,7 +2427,9 @@ function renderStatementComparison(rows){
     match: '<span style="color:var(--pine-deep);font-weight:600;">✓ مطابق</span>',
     mismatch: '<span style="color:var(--brick);font-weight:600;">⚠ فرق</span>',
     missing_in_app: '<span style="color:var(--brick);font-weight:600;">✗ مش موجودة عندنا</span>',
-    missing_in_statement: '<span style="color:var(--steel);font-weight:600;">✗ مش في كشف المورد</span>'
+    missing_in_statement: '<span style="color:var(--steel);font-weight:600;">✗ مش في كشف المورد</span>',
+    duplicate_in_app: '<span style="color:var(--brick);font-weight:600;">⚠ متسجلة عندك مرتين — امسح النسخة الزيادة</span>',
+    other_supplier: '<span style="color:#8a6312;font-weight:600;">↔ متسجلة عندك باسم مورد تاني</span>'
   };
   const matchByNote = { date: ' <span style="font-size:10px;color:var(--ink-soft);">(بالتاريخ، راجعها)</span>', number: '', '': '' };
   els.statementCompareResult.innerHTML = `
@@ -2426,7 +2442,7 @@ function renderStatementComparison(rows){
           <td class="mono" style="padding:8px 4px;">${(r.total!==null&&r.total!==undefined)?apFmt(r.total):'—'}</td>
           <td class="mono" style="padding:8px 4px;">${(r.ourTotal!==null&&r.ourTotal!==undefined)?apFmt(r.ourTotal):'—'}</td>
           <td class="mono" style="padding:8px 4px;">${(r.diff!==null&&r.diff!==undefined&&Math.abs(r.diff)>=0.5)?apFmt(r.diff):'—'}</td>
-          <td style="padding:8px 4px;">${statusLabel[r.status]}${matchByNote[r.matchedBy]||''}</td>
+          <td style="padding:8px 4px;">${statusLabel[r.status]}${matchByNote[r.matchedBy]||''}${r.otherStore ? `<div style="font-size:11px;color:var(--ink-soft);" dir="auto">${escapeHtml(r.otherStore)}</div>` : ''}</td>
         </tr>`).join('')}
       </tbody>
     </table>`;
@@ -2480,12 +2496,22 @@ els.statementFileInput.addEventListener('change', async ()=>{
     const compared = compareStatementToRecords(items, supplier, from, to);
     renderStatementComparison(compared);
     const issues = compared.filter(r=> r.status !== 'match').length;
+    const cnt = (st)=> compared.filter(r=> r.status === st);
+    const others = cnt('other_supplier'), dups = cnt('duplicate_in_app'), missApp = cnt('missing_in_app'), diffs = cnt('mismatch'), missStmt = cnt('missing_in_statement');
+    const sumOf = (arr, k)=> arr.reduce((t,r)=> t + (r[k]||0), 0);
+    const tips = [];
+    if(others.length){ const names = [...new Set(others.map(r=> r.otherStore))]; tips.push(`↔ <b>${others.length}</b> فاتورة متسجلة عندك باسم مورد تاني (${names.map(n=> escapeHtml(n)).join('، ')}) — ادمج الاسمين من "دمج موردين متكررين" عشان تتحسب صح.`); }
+    if(dups.length) tips.push(`⚠ <b>${dups.length}</b> فاتورة متسجلة عندك مرتين بإجمالي زيادة <b class="mono">${apFmt(sumOf(dups,'ourTotal'))}</b> — امسح النسخة الزيادة من سجل الفواتير.`);
+    if(missApp.length) tips.push(`✗ <b>${missApp.length}</b> فاتورة في كشف المورد مش متسجلة عندك خالص بإجمالي <b class="mono">${apFmt(sumOf(missApp,'total'))}</b> — اطلب صورها من المورد أو دوّر عليها وسجّلها.`);
+    if(diffs.length) tips.push(`⚠ <b>${diffs.length}</b> فاتورة إجماليها عندك مختلف عن الكشف — راجع الأصناف.`);
+    if(missStmt.length) tips.push(`✗ <b>${missStmt.length}</b> فاتورة عندك مش في الكشف بإجمالي <b class="mono">${apFmt(sumOf(missStmt,'ourTotal'))}</b> — ممكن تكون اتدفعت، أو المورد ناسيها، أو فاتورة مش بتاعته.`);
+    const tipsHtml = tips.length ? `<div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:5px;padding:10px 12px;margin:8px 0;font-size:13px;line-height:1.9;">${tips.join('<br>')}</div>` : '';
     const stmtTotal = items.reduce((t,i)=> t + (Number(i.total)||0), 0);
     const ourTotal = compared.reduce((t,r)=> t + (r.ourTotal||0), 0);
     els.statementStatus.innerHTML = supplierWarn + (issues === 0
       ? `<div class="status-line" style="color:var(--pine-deep);">✓ كل حاجة متطابقة (${compared.length} فاتورة)${periodNote}</div>`
       : `<div class="status-line" style="color:var(--brick);">⚠ فيه ${issues} فاتورة محتاجة مراجعة من أصل ${compared.length}${periodNote}</div>`)
-      + `<div class="status-line" style="font-size:13px;">إجمالي الكشف: <b class="mono">${apFmt(stmtTotal)}</b> · إجمالي عندنا لنفس الفترة: <b class="mono">${apFmt(ourTotal)}</b> · الفرق: <b class="mono">${apFmt(ourTotal - stmtTotal)}</b></div>`;
+      + tipsHtml + `<div class="status-line" style="font-size:13px;">إجمالي الكشف: <b class="mono">${apFmt(stmtTotal)}</b> · إجمالي عندنا لنفس الفترة: <b class="mono">${apFmt(ourTotal)}</b> · الفرق: <b class="mono">${apFmt(ourTotal - stmtTotal)}</b></div>`;
   }catch(e){
     console.error(e);
     els.statementStatus.innerHTML = `<div class="error-box">فشل التحليل: ${escapeHtml(e.message || String(e))}</div>`;
