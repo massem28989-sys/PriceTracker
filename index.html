@@ -559,8 +559,8 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 
   <div id="settlementView" style="display:none;">
     <div class="section-title">
-      <span>تسوية الموردين</span>
-      <button class="btn btn-ghost" id="exportSettlementBtn" style="padding:6px 14px;font-size:12px;">تصدير كل الموردين Excel</button>
+      <span>كشف حساب الموردين</span>
+      <button class="btn btn-ghost" id="exportSettlementBtn" style="padding:6px 14px;font-size:12px;" title="ملخص كل الموردين شهر بشهر + كشف كل مورد (حسب فترة من/إلى لو محددة)">تصدير كل الموردين شهر بشهر Excel</button>
     </div>
     <p class="hint">الإجماليات هنا شاملة الضريبة (المبلغ الفعلي اللي بتدفعه للمورد) — مختلفة عن أسعار المتابعة في تبويب "المنتجات" اللي دايمًا قبل الضريبة عشان تفضل المقارنة صحيحة.</p>
     <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
@@ -2259,7 +2259,37 @@ els.exportSettlementBtn.addEventListener('click', ()=>{
   const fromDate = els.settlementFromDate.value || '';
   const toDate = els.settlementToDate.value || '';
   const wb = XLSX.utils.book_new();
-  const usedNames = new Set();
+  const usedNames = new Set(['ملخص شهري','إجمالي الفترة']);
+  const r2 = (n)=> Math.round((Number(n)||0)*100)/100;
+  const addSheet = (rows, name, firstW)=>{ const ws = XLSX.utils.json_to_sheet(rows); ws['!views'] = [{ RTL: true }]; ws['!cols'] = Object.keys(rows[0]||{}).map((k,i)=> ({ wch: i===0 ? (firstW||42) : 16 })); XLSX.utils.book_append_sheet(wb, ws, name); };
+  // 1) ملخص شهري: كل مورد في صف، وكل شهر في عمود (الإجمالي شامل الضريبة)
+  const perSup = new Map(); const monthsSet = new Set();
+  suppliers.forEach(sup=>{
+    const rows = computeSettlementRows(sup, fromDate, toDate);
+    if(!rows.length) return;
+    const m = new Map();
+    rows.forEach(r=>{ const k = r.date ? r.date.slice(0,7) : 'بدون تاريخ'; monthsSet.add(k); const o = m.get(k) || { n:0, sub:0, vat:0, total:0 }; o.n++; o.sub += r.subtotal; o.vat += r.vat; o.total += r.total; m.set(k, o); });
+    perSup.set(sup, m);
+  });
+  if(!perSup.size){ alert('مفيش فواتير في الفترة المحددة.'); return; }
+  const months = [...monthsSet].sort();
+  const matrix = [...perSup.entries()].map(([sup, m])=>{
+    const row = { 'المورد': sup };
+    let t = 0; months.forEach(k=>{ const v = m.get(k) ? m.get(k).total : 0; row[k] = r2(v); t += v; });
+    row['الإجمالي'] = r2(t); return row;
+  }).sort((a,b)=> b['الإجمالي'] - a['الإجمالي']);
+  const totRow = { 'المورد': 'الإجمالي' }; months.concat(['الإجمالي']).forEach(k=> totRow[k] = r2(matrix.reduce((t,r)=> t + (r[k]||0), 0)));
+  matrix.push(totRow);
+  addSheet(matrix, 'ملخص شهري');
+  // 2) إجمالي الفترة لكل مورد: عدد الفواتير وقبل الضريبة والضريبة والإجمالي
+  const period = [...perSup.entries()].map(([sup, m])=>{
+    let n=0, sub=0, vat=0, total=0; m.forEach(o=>{ n+=o.n; sub+=o.sub; vat+=o.vat; total+=o.total; });
+    return { 'المورد': sup, 'عدد الفواتير': n, 'الإجمالي قبل الضريبة': r2(sub), 'الضريبة': r2(vat), 'الإجمالي شامل الضريبة': r2(total) };
+  }).sort((a,b)=> b['الإجمالي شامل الضريبة'] - a['الإجمالي شامل الضريبة']);
+  const s2 = (k)=> r2(period.reduce((t,r)=> t + r[k], 0));
+  period.push({ 'المورد': 'الإجمالي', 'عدد الفواتير': period.reduce((t,r)=> t + r['عدد الفواتير'], 0), 'الإجمالي قبل الضريبة': s2('الإجمالي قبل الضريبة'), 'الضريبة': s2('الضريبة'), 'الإجمالي شامل الضريبة': s2('الإجمالي شامل الضريبة') });
+  addSheet(period, 'إجمالي الفترة');
+  // 3) شيت لكل مورد بفواتيره
   suppliers.forEach(supplier=>{
     const rows = computeSettlementRows(supplier, fromDate, toDate);
     if(rows.length === 0) return;
@@ -2282,10 +2312,10 @@ els.exportSettlementBtn.addEventListener('click', ()=>{
       'الضريبة': Math.round(grandVat*100)/100,
       'الإجمالي شامل الضريبة': Math.round(grandTotal*100)/100
     });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), sanitizeSheetName(supplier, usedNames));
+    const wsS = XLSX.utils.json_to_sheet(sheetRows); wsS['!views'] = [{ RTL: true }]; wsS['!cols'] = [{wch:20},{wch:14},{wch:18},{wch:12},{wch:14},{wch:18}];
+    XLSX.utils.book_append_sheet(wb, wsS, sanitizeSheetName(supplier, usedNames));
   });
-  if(wb.SheetNames.length === 0){ alert('مفيش فواتير في الفترة المحددة.'); return; }
-  const fileLabel = (fromDate||toDate) ? `تسوية-الموردين-${fromDate||'البداية'}-الى-${toDate||'الآن'}.xlsx` : 'تسوية-الموردين.xlsx';
+  const fileLabel = (fromDate||toDate) ? `الموردين-شهر-بشهر-${fromDate||'البداية'}-الى-${toDate||'الآن'}.xlsx` : 'الموردين-شهر-بشهر.xlsx';
   XLSX.writeFile(wb, fileLabel);
 });
 
