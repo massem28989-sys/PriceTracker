@@ -862,6 +862,30 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   </div>
 </div>
 <!-- ==== INVOICE FILES HTML END ==== -->
+<!-- ==== CREDIT NOTES HTML START ==== -->
+<div class="overlay" id="cnOverlay">
+  <div class="modal" style="max-width:600px;">
+    <button class="modal-close" id="cnClose">×</button>
+    <h2>تسجيل مرتجع / إشعار دائن</h2>
+    <p class="hint">المرتجع بيقلّل المستحق للمورد. لو مربوط بفاتورة بيتخصم منها، ولو لأ بيتخصم من رصيد المورد كله.</p>
+    <div class="ap-form-grid">
+      <div class="ap-f full"><label>المورد</label><select id="cnSupplier"></select></div>
+      <div class="ap-f"><label>التاريخ</label><input type="date" id="cnDate"></div>
+      <div class="ap-f"><label>رقم الإشعار / المرتجع</label><input id="cnNumber" placeholder="اختياري"></div>
+      <div class="ap-f"><label>القيمة قبل الضريبة</label><input class="num" id="cnAmount" inputmode="decimal" placeholder="0.00"></div>
+      <div class="ap-f"><label>الضريبة %</label><input class="num" id="cnVat" inputmode="decimal" value="5"></div>
+      <div class="ap-f full" id="cnTotal" style="font-size:13px;color:var(--pine-deep);font-weight:600;min-height:18px;"></div>
+      <div class="ap-f full"><label>الفاتورة الأصلية</label><select id="cnInvoice"></select></div>
+      <div class="ap-f full"><label>السبب</label><input id="cnReason" placeholder="مثلًا: بضاعة تالفة، كمية ناقصة، فرق سعر"></div>
+    </div>
+    <div class="ap-err" id="cnErr"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="cnSave" style="background:var(--pine-deep);color:var(--white);">حفظ المرتجع</button>
+      <button class="btn btn-ghost" id="cnCancel">إلغاء</button>
+    </div>
+  </div>
+</div>
+<!-- ==== CREDIT NOTES HTML END ==== -->
 <!-- ==== PAYABLES MODALS START ==== -->
 <div class="overlay" id="apPayOverlay">
   <div class="modal" style="max-width:720px;">
@@ -3723,7 +3747,7 @@ function ixMergePrinted(v, p){
 function ixNewInv(o){
   return Object.assign({ id: ix.seq++, fileId: 0, firstPage: 0, pageIds: [], store:'', storeOriginal:'', date:'', invoiceNumber:'',
     paymentType:'', vatRate:5, items:[], printed:{subtotal:null,vat:null,total:null}, skipped:false, approved:false,
-    saved:false, saveError:'', readError:'', busy:false }, o);
+    saved:false, saveError:'', readError:'', busy:false, isCredit:false, origInvoiceNumber:'' }, o);
 }
 
 // تجميع صفحات الملف الواحد في فواتير (صفحة إجماليات أو صفحة تكملة بنفس الرقم بتنضم للفاتورة اللي قبلها)
@@ -3749,7 +3773,8 @@ function ixGroupFile(fileId){
     }
     const v = ixNewInv({ fileId, firstPage: p.pageNo, pageIds:[p.id],
       store: (r.store||'').toString().trim(), date: r.date || '', invoiceNumber: r.invoiceNumber ? String(r.invoiceNumber).trim() : '',
-      items: items.length ? items : [ixEmptyItem()], printed });
+      items: items.length ? items : [ixEmptyItem()], printed,
+      isCredit: r.docKind === 'credit_note', origInvoiceNumber: r.originalInvoiceNumber ? String(r.originalInvoiceNumber).trim() : '' });
     if(!items.length) v.readError = r.pageType === 'totals_only'
       ? 'الصفحة دي فيها إجماليات بس من غير أصناف — لو هي تكملة لفاتورة تانية تجاهلها'
       : 'ما لقيتش أصناف في الصفحة دي';
@@ -3813,6 +3838,7 @@ function ixCheck(v){
 function ixDupInDb(v){
   if(!v.invoiceNumber || !v.store) return null;
   const n = normalizeInvoiceNumber(v.invoiceNumber);
+  if(v.isCredit){ const c = (typeof apCredits !== 'undefined' ? apCredits : []).find(c=> c.supplier === v.store && c.number && normalizeInvoiceNumber(c.number) === n); return c ? { date: c.date } : null; }
   return invoices.find(i=> i.store === v.store && i.invoiceNumber && normalizeInvoiceNumber(i.invoiceNumber) === n) || null;
 }
 function ixDupInBatch(v){
@@ -3835,7 +3861,12 @@ function ixIssues(v){
   const c = ixCheck(v);
   if(valid.length && c.state === 'err') errs.push(`مجموع الأصناف ${ixFmt(c.mine)} مش مساوي الإجمالي المطبوع ${ixFmt(c.target)} (${c.label}) — الفرق ${ixFmt(Math.abs(c.diff))}. قارن الأسطر بالصورة.`);
   const dupDb = ixDupInDb(v);
-  if(dupDb) errs.push(`الفاتورة رقم ${v.invoiceNumber} من ${v.store} متسجلة قبل كده بتاريخ ${dupDb.date || '—'}`);
+  if(dupDb) errs.push(`${v.isCredit ? 'المرتجع' : 'الفاتورة'} رقم ${v.invoiceNumber} من ${v.store} ${v.isCredit ? 'متسجل' : 'متسجلة'} قبل كده بتاريخ ${dupDb.date || '—'}`);
+  if(v.isCredit){
+    if(typeof cnMissing !== 'undefined' && cnMissing) errs.push('المرتجعات لسه مش متفعّلة — شغّل ملف supabase-schema-v20-credit-notes.sql في Supabase');
+    const orig = v.origInvoiceNumber ? cnFindInvoice(v.store, v.origInvoiceNumber) : null;
+    infos.push('ده <b>مرتجع / إشعار دائن</b> — هيتخصم من رصيد المورد' + (orig ? ` ومن فاتورة #${escapeHtml(orig.invoiceNumber)}` : (v.origInvoiceNumber ? ` (الفاتورة الأصلية #${escapeHtml(v.origInvoiceNumber)} مش لاقيها عندك — هيتخصم من الرصيد العام)` : '')) + '. لو هو فاتورة عادية غيّر "نوع المستند".');
+  }
   const dupB = ixDupInBatch(v);
   if(dupB) errs.push(`نفس رقم الفاتورة متكرر في الملفات اللي رفعتها (غالبًا نفس الفاتورة اتصورت مرتين)`);
   if(!valid.length) { /* لما الفاتورة فاضية كفاية الخطأ الأساسي */ }
@@ -3914,7 +3945,7 @@ function ixRenderSide(){
     const show = ix.filter === 'all' || (ix.filter === 'need' && iss.status === 'err') || (ix.filter === 'ready' && ixSavable(v)) || (ix.filter === 'saved' && iss.status === 'saved');
     if(!show) return;
     const total = ixSum(v) * (1 + ixVatRate(v)/100);
-    const sub = [v.invoiceNumber ? '#' + v.invoiceNumber : '', v.date || '', v.skipped ? 'متجاهلة' : '', v.saved ? 'اتحفظت ✓' : ''].filter(Boolean).join(' · ');
+    const sub = [v.isCredit ? 'مرتجع' : '', v.invoiceNumber ? '#' + v.invoiceNumber : '', v.date || '', v.skipped ? 'متجاهلة' : '', v.saved ? 'اتحفظت ✓' : ''].filter(Boolean).join(' · ');
     rows.push(`<button class="ix-item st-${iss.status} ${ix.cur===v.id?'on':''}" data-inv="${v.id}">
       <span class="ix-dot"></span>
       <span class="ix-item-main"><b dir="auto">${escapeHtml(v.store || 'مورد غير معروف')}</b><small>${escapeHtml(sub || '—')}</small></span>
@@ -3984,8 +4015,13 @@ function ixRenderMain(){
       <div class="ix-issues" id="ixIssues">${ixIssuesHtml(iss, v)}</div>
       <div class="ix-grid">
         <div class="ix-field full"><label>المورد</label><input data-f="store" value="${escapeHtml(v.store||'')}" list="ixSuppliers" placeholder="اسم المورد" ${ro}>${storeNote}</div>
+        <div class="ix-field"><label>نوع المستند</label><select data-f="isCredit" ${ro}>
+          <option value="" ${!v.isCredit?'selected':''}>فاتورة شراء</option>
+          <option value="1" ${v.isCredit?'selected':''}>مرتجع / إشعار دائن</option>
+        </select></div>
+        ${v.isCredit ? `<div class="ix-field"><label>رقم الفاتورة الأصلية</label><input data-f="origInvoiceNumber" value="${escapeHtml(v.origInvoiceNumber||'')}" placeholder="اختياري" ${ro}></div>` : ''}
         <div class="ix-field"><label>التاريخ</label><input type="date" data-f="date" value="${escapeHtml(v.date||'')}" ${ro}></div>
-        <div class="ix-field"><label>رقم الفاتورة</label><input data-f="invoiceNumber" value="${escapeHtml(v.invoiceNumber||'')}" ${ro}></div>
+        <div class="ix-field"><label>${v.isCredit ? 'رقم المرتجع' : 'رقم الفاتورة'}</label><input data-f="invoiceNumber" value="${escapeHtml(v.invoiceNumber||'')}" ${ro}></div>
         <div class="ix-field"><label>الدفع</label><select data-f="paymentType" ${ro}>
           <option value="" ${!v.paymentType?'selected':''}>غير محدد</option>
           <option value="credit" ${v.paymentType==='credit'?'selected':''}>آجل (كريديت)</option>
@@ -4008,7 +4044,7 @@ function ixIssuesHtml(iss, v){
   const out = [];
   iss.errs.forEach(e=> out.push(`<div class="ix-issue err">✕ ${typeof e === 'string' ? escapeHtml(e) : e.html}</div>`));
   iss.warns.forEach(e=> out.push(`<div class="ix-issue warn">! ${escapeHtml(e)}</div>`));
-  iss.infos.forEach(e=> out.push(`<div class="ix-issue info">${escapeHtml(e)}</div>`));
+  iss.infos.forEach(e=> out.push(`<div class="ix-issue info">${/^ده <b>/.test(e) ? e : escapeHtml(e)}</div>`));
   if(!v.saved && !v.skipped && !iss.errs.length && iss.check.state === 'ok') out.unshift(`<div class="ix-issue ok">✓ مجموع الأصناف مطابق للإجمالي المطبوع في الفاتورة</div>`);
   if(v.approved && iss.errs.length) out.push(`<div class="ix-issue info">اعتمدتها رغم الملاحظات — هتتحفظ زي ما هي. <a href="#" data-act="unapprove">إلغاء الاعتماد</a></div>`);
   if(v.skipped) out.unshift(`<div class="ix-issue info">الفاتورة دي متجاهلة ومش هتتحفظ. <a href="#" data-act="unskip">رجّعها</a></div>`);
@@ -4130,6 +4166,8 @@ async function ixReread(v){
       if(r.store) v.store = String(r.store).trim();
       if(r.date) v.date = r.date;
       if(r.invoiceNumber) v.invoiceNumber = String(r.invoiceNumber).trim();
+      if(r.docKind) v.isCredit = r.docKind === 'credit_note';
+      if(r.originalInvoiceNumber) v.origInvoiceNumber = String(r.originalInvoiceNumber).trim();
       v.printed = { subtotal:null, vat:null, total:null }; ixMergePrinted(v, ixPrinted(r));
       v.readError = ''; v.approved = false;
       ixApplySupplier(v, false);
@@ -4144,10 +4182,19 @@ async function ixSaveAll(){
   const list = ix.invs.filter(ixSavable);
   if(!list.length) return;
   ix.saving = true; ixRenderTop();
-  let ok = 0, fail = 0, imgFail = 0;
+  let ok = 0, fail = 0, imgFail = 0, credits = 0;
   for(const v of list){
     const items = ixValidItems(v).map(it=>({ name: it.name.trim(), barcode: (it.barcode||'').trim(), price: ixNum(it.price), qty: ixNum(it.qty) || 1, unit: (it.unit||'').trim(), destination: (it.destination||'').trim() }));
     try{
+      if(v.isCredit){
+        const amount = items.reduce((t,it)=> t + it.price, 0), rate = ixVatRate(v);
+        const orig = v.origInvoiceNumber ? cnFindInvoice(v.store.trim(), v.origInvoiceNumber) : null;
+        await cnInsert({ supplier: v.store.trim(), date: v.date || ixToday(), number: (v.invoiceNumber||'').trim(), amount, vatRate: rate, total: amount * (1 + rate/100),
+          invoiceId: orig ? orig.id : null, reason: 'مرتجع: ' + items.map(it=> it.name).slice(0,4).join('، '), items });
+        v.saved = true; v.saveError = ''; ok++; credits++;
+        ixRenderSide(); ixRenderTop();
+        continue;
+      }
       const newId = await insertInvoiceRemote(v.store.trim(), v.date || '', items, ixVatRate(v), (v.invoiceNumber||'').trim(), v.paymentType || '');
       v.saved = true; v.saveError = ''; ok++;
       const imgs = v.pageIds.map(id=> ix.pages.find(p=> p.id === id)).filter(Boolean).map(p=> p.img);
@@ -4157,6 +4204,7 @@ async function ixSaveAll(){
   }
   try{ await refreshInvoicesFromServer(); renderAll(); }catch(e){ console.error(e); }
   ix.saving = false;
+  if(credits) ixToast(`منهم ${credits} مرتجع اتسجل على المديونية`);
   ixEl('ixSuppliers').innerHTML = ixKnownSuppliers().sort().map(s=> `<option value="${escapeHtml(s)}">`).join('');
   ixRenderAll();
   const left = ix.invs.filter(v=> !v.saved && !v.skipped).length;
@@ -4183,6 +4231,7 @@ const ixMain = ixEl('ixMain');
 ixMain.addEventListener('input', (e)=>{
   const v = ixCurInv(); if(!v || v.saved) return;
   const t = e.target;
+  if(t.dataset.f === 'isCredit'){ v.isCredit = !!t.value; ixRenderMain(); ixRefreshComputed(); return; }
   if(t.dataset.f){ v[t.dataset.f] = t.value; if(t.dataset.f === 'store') v.storeOriginal = ''; }
   else if(t.dataset.k){ const it = v.items[Number(t.dataset.i)]; if(it){ it[t.dataset.k] = t.value; if(t.dataset.k === 'qty' || t.dataset.k === 'price') it.printedUP = null; } }
   else return;
@@ -4258,6 +4307,7 @@ async function apLoad(){
     allocs: (r.payment_allocations||[]).map(a=>({ invoiceId: a.invoice_id, amount: Number(a.amount)||0 })) }));
   const ob = await sb.from('supplier_opening_balances').select('supplier_name, amount, as_of').eq('workspace_id', currentWorkspace.id);
   if(!ob.error) (ob.data||[]).forEach(r=> apOpening.set(r.supplier_name, { amount: Number(r.amount)||0, asOf: r.as_of }));
+  await cnLoad();
 }
 
 function apInvoiceTotal(inv){
@@ -4277,7 +4327,7 @@ function apBucket(daysOver){ return daysOver <= 0 ? 0 : daysOver <= 30 ? 1 : day
 // الحسبة كلها لتاريخ معيّن (asOf): فواتير الآجل - المدفوعات + الرصيد الافتتاحي
 function apCompute(asOf){
   const sups = new Map();
-  const S = (name)=>{ if(!sups.has(name)) sups.set(name, { name, opening:0, openingAsOf:'', openingLeft:0, invoices:[], payments:[], unalloc:0, advance:0, buckets:[0,0,0,0,0], balance:0, overdue:0, dueSoon:0, lastPay:null, totalInv:0, totalPaid:0 }); return sups.get(name); };
+  const S = (name)=>{ if(!sups.has(name)) sups.set(name, { name, opening:0, openingAsOf:'', openingLeft:0, invoices:[], payments:[], unalloc:0, advance:0, buckets:[0,0,0,0,0], balance:0, overdue:0, dueSoon:0, lastPay:null, totalInv:0, totalPaid:0, credits:[], totalCredit:0 }); return sups.get(name); };
   const allocByInv = new Map();
   apPayments.filter(p=> p.date <= asOf).forEach(p=>{
     const s = S(p.supplier);
@@ -4286,6 +4336,20 @@ function apCompute(asOf){
     s.unalloc += Math.max(0, p.amount - used);
     p.allocs.forEach(a=> allocByInv.set(a.invoiceId, (allocByInv.get(a.invoiceId)||0) + a.amount));
     if(!s.lastPay || p.date > s.lastPay.date) s.lastPay = p;
+  });
+  // المرتجعات: تتخصم من فاتورتها (في حدود المتبقي منها) والباقي تحت الحساب
+  const invById = new Map(invoices.map(i=> [i.id, i]));
+  (typeof apCredits !== 'undefined' ? apCredits : []).filter(c=> c.date <= asOf).sort((a,b)=> (a.date||'').localeCompare(b.date||'')).forEach(c=>{
+    const s = S(c.supplier);
+    s.credits.push(c); s.totalCredit += c.total;
+    const inv = c.invoiceId ? invById.get(c.invoiceId) : null;
+    let applied = 0;
+    if(inv && !apIsCash(inv) && (!inv.date || inv.date <= asOf)){
+      const left = apInvoiceTotal(inv) - (allocByInv.get(inv.id) || 0);
+      applied = Math.max(0, Math.min(c.total, left));
+      allocByInv.set(inv.id, (allocByInv.get(inv.id) || 0) + applied);
+    }
+    s.unalloc += c.total - applied;
   });
   invoices.forEach(inv=>{
     if(!inv.store || apIsCash(inv)) return;
@@ -4351,6 +4415,7 @@ function apRender(){
       <h3>المديونية للموردين</h3>
       <label class="ap-asof">الأرصدة في تاريخ <input type="date" id="apAsOf" value="${ap.asOf}"></label>
       <button class="ap-btn" id="apExportAging" title="أرصدة كل الموردين في التاريخ المختار + حركة الشهر">تصدير الأرصدة Excel</button>
+      <button class="ap-btn contributor-ok" data-ap="credit">+ مرتجع</button>
       <button class="ap-btn primary owner-only" data-ap="pay">+ تسجيل دفعة</button>
     </div>
     <div class="ap-kpis">
@@ -4403,7 +4468,11 @@ function apLedger(s){
   if(s.opening) lines.push({ date: s.openingAsOf, kind:'open', desc:'رصيد افتتاحي', ref:'', credit: s.opening, debit: 0 });
   s.invoices.forEach(r=> lines.push({ date: r.inv.date || '', kind:'inv', desc:'فاتورة مشتريات', ref: r.inv.invoiceNumber || '', credit: r.total, debit: 0 }));
   s.payments.forEach(p=> lines.push({ date: p.date, kind:'pay', desc: 'دفعة — ' + (AP_METHODS[p.method] || 'دفع') + (p.note ? ' — ' + p.note : ''), ref: p.reference || '', credit: 0, debit: p.amount, pay: p }));
-  const order = { open:0, inv:1, pay:2 };
+  (s.credits||[]).forEach(c=>{
+    const inv = c.invoiceId ? invoices.find(i=> i.id === c.invoiceId) : null;
+    lines.push({ date: c.date, kind:'cn', desc: 'مرتجع / إشعار دائن' + (inv && inv.invoiceNumber ? ' على فاتورة #' + inv.invoiceNumber : '') + (c.reason ? ' — ' + c.reason : ''), ref: c.number || '', credit: 0, debit: c.total, cn: c });
+  });
+  const order = { open:0, inv:1, cn:2, pay:3 };
   lines.sort((a,b)=> (a.date||'').localeCompare(b.date||'') || order[a.kind] - order[b.kind]);
   let bal = 0;
   lines.forEach(l=>{ bal = apR(bal + l.credit - l.debit); l.balance = bal; });
@@ -4425,25 +4494,26 @@ function apRenderSupplier(root){
       <label class="ap-asof">في تاريخ <input type="date" id="apAsOf" value="${ap.asOf}"></label>
       <button class="ap-btn" id="apExportLedger">كشف حساب Excel</button>
       <button class="ap-btn owner-only" data-ap="opening">الرصيد الافتتاحي</button>
+      <button class="ap-btn contributor-ok" data-ap="credit">+ مرتجع</button>
       <button class="ap-btn primary owner-only" data-ap="pay">+ تسجيل دفعة</button>
     </div>
     <div class="ap-kpis">
       <div class="ap-kpi"><div class="lbl">الرصيد المستحق</div><div class="val">${apFmt(s.balance)}</div><div class="sub">${escapeHtml(settings.currency||'')}</div></div>
       <div class="ap-kpi ${s.overdue>0.004?'bad':''}"><div class="lbl">متأخر</div><div class="val">${apFmt(s.overdue)}</div><div class="sub">${openInv.filter(r=>r.daysOver>0).length} فاتورة</div></div>
       <div class="ap-kpi"><div class="lbl">فواتير آجل لحد التاريخ ده</div><div class="val">${apFmt(s.totalInv)}</div><div class="sub">${s.invoices.length} فاتورة</div></div>
-      <div class="ap-kpi"><div class="lbl">إجمالي المدفوع</div><div class="val">${apFmt(s.totalPaid)}</div><div class="sub">${s.payments.length} دفعة</div></div>
+      <div class="ap-kpi"><div class="lbl">إجمالي المدفوع</div><div class="val">${apFmt(s.totalPaid)}</div><div class="sub">${s.payments.length} دفعة${s.totalCredit ? ` · مرتجعات ${apFmt(s.totalCredit)}` : ''}</div></div>
     </div>
     <div class="ap-sec"><h4>الفواتير المفتوحة</h4><span class="hint2">${openInv.length} فاتورة عليها مبالغ</span></div>
     <div class="ap-scroll"><table class="ap-table">
-      <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th class="n">قيمة الفاتورة</th><th class="n">المدفوع</th><th class="n">المتبقي</th><th>الحالة</th></tr></thead>
+      <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th class="n">قيمة الفاتورة</th><th class="n">المدفوع / المرتجع</th><th class="n">المتبقي</th><th>الحالة</th></tr></thead>
       <tbody>${openInv.length ? openInv.map(r=> `<tr><td class="mono">${escapeHtml(r.inv.invoiceNumber||'—')} ${invFileBtn(r.inv.id,'')}</td><td>${escapeHtml(r.inv.date||'—')}</td><td>${escapeHtml(r.due||'—')}</td><td class="n">${apFmt(r.total)}</td><td class="n">${apCell(r.paid)}</td><td class="n"><b>${apFmt(r.open)}</b></td><td>${apStatusPill(r)}</td></tr>`).join('')
         : `<tr><td colspan="7"><div class="ap-empty">كل فواتير المورد ده مدفوعة.</div></td></tr>`}</tbody>
     </table></div>
-    <div class="ap-sec"><h4>كشف الحساب</h4><span class="hint2">دائن = فواتير علينا للمورد · مدين = مدفوعات للمورد</span></div>
+    <div class="ap-sec"><h4>كشف الحساب</h4><span class="hint2">دائن = فواتير علينا للمورد · مدين = مدفوعات ومرتجعات</span></div>
     <div class="ap-scroll"><table class="ap-table">
-      <thead><tr><th>التاريخ</th><th>البيان</th><th>المرجع</th><th class="n">مدين (مدفوع)</th><th class="n">دائن (فواتير)</th><th class="n">الرصيد</th><th class="owner-only"></th></tr></thead>
+      <thead><tr><th>التاريخ</th><th>البيان</th><th>المرجع</th><th class="n">مدين (مدفوع ومرتجع)</th><th class="n">دائن (فواتير)</th><th class="n">الرصيد</th><th class="owner-only"></th></tr></thead>
       <tbody>${lines.length ? lines.map(l=> `<tr><td>${escapeHtml(l.date||'—')}</td><td>${escapeHtml(l.desc)}</td><td class="mono">${escapeHtml(l.ref||'')}</td><td class="n">${apCell(l.debit)}</td><td class="n">${apCell(l.credit)}</td><td class="n"><b>${apFmt(l.balance)}</b></td>
-        <td class="owner-only">${l.pay ? `<button class="ap-link danger" data-delpay="${escapeHtml(String(l.pay.id))}">حذف الدفعة</button>` : ''}</td></tr>`).join('')
+        <td class="owner-only">${l.pay ? `<button class="ap-link danger" data-delpay="${escapeHtml(String(l.pay.id))}">حذف الدفعة</button>` : ''}${l.cn ? `<button class="ap-link danger" data-delcn="${escapeHtml(String(l.cn.id))}">حذف المرتجع</button>` : ''}</td></tr>`).join('')
         : `<tr><td colspan="7"><div class="ap-empty">مفيش حركات.</div></td></tr>`}</tbody>
       ${lines.length ? `<tfoot><tr><td colspan="3">الإجمالي</td><td class="n">${apFmt(lines.reduce((t,l)=>t+l.debit,0))}</td><td class="n">${apFmt(lines.reduce((t,l)=>t+l.credit,0))}</td><td class="n">${apFmt(s.balance)}</td><td class="owner-only"></td></tr></tfoot>` : ''}
     </table></div>`;
@@ -4578,9 +4648,10 @@ function apExportAging(){
     const opening = o ? o.balance : 0, closing = c ? c.balance : 0;
     const purchases = c ? c.invoices.filter(r=> (r.inv.date||'') >= mStart).reduce((t,r)=> t + r.total, 0) : 0;
     const paid = apPayments.filter(p=> p.supplier === n && p.date >= mStart && p.date <= ap.asOf).reduce((t,p)=> t + p.amount, 0);
+    const credits = apCredits.filter(cn=> cn.supplier === n && cn.date >= mStart && cn.date <= ap.asOf).reduce((t,cn)=> t + cn.total, 0);
     const ob = apOpening.get(n); const obIn = ob && ob.asOf >= mStart && ob.asOf <= ap.asOf ? ob.amount : 0;
-    if(Math.abs(opening) < 0.005 && Math.abs(closing) < 0.005 && purchases < 0.005 && paid < 0.005) return;
-    const row = { 'المورد': n, 'رصيد أول الشهر': apR(opening), 'مشتريات آجل خلال الفترة': apR(purchases), 'مدفوعات خلال الفترة': apR(paid) };
+    if(Math.abs(opening) < 0.005 && Math.abs(closing) < 0.005 && purchases < 0.005 && paid < 0.005 && credits < 0.005) return;
+    const row = { 'المورد': n, 'رصيد أول الشهر': apR(opening), 'مشتريات آجل خلال الفترة': apR(purchases), 'مرتجعات خلال الفترة': apR(credits), 'مدفوعات خلال الفترة': apR(paid) };
     if(obIn) row['رصيد افتتاحي مسجل خلال الفترة'] = apR(obIn);
     row['رصيد آخر الفترة'] = apR(closing);
     move.push(row);
@@ -4588,7 +4659,7 @@ function apExportAging(){
   move.sort((x,y)=> y['رصيد آخر الفترة'] - x['رصيد آخر الفترة']);
   if(move.length){
     const sum = (k)=> apR(move.reduce((t,r)=> t + (r[k]||0), 0));
-    const tot = { 'المورد': 'الإجمالي', 'رصيد أول الشهر': sum('رصيد أول الشهر'), 'مشتريات آجل خلال الفترة': sum('مشتريات آجل خلال الفترة'), 'مدفوعات خلال الفترة': sum('مدفوعات خلال الفترة') };
+    const tot = { 'المورد': 'الإجمالي', 'رصيد أول الشهر': sum('رصيد أول الشهر'), 'مشتريات آجل خلال الفترة': sum('مشتريات آجل خلال الفترة'), 'مرتجعات خلال الفترة': sum('مرتجعات خلال الفترة'), 'مدفوعات خلال الفترة': sum('مدفوعات خلال الفترة') };
     if(move.some(r=> r['رصيد افتتاحي مسجل خلال الفترة'])) tot['رصيد افتتاحي مسجل خلال الفترة'] = sum('رصيد افتتاحي مسجل خلال الفترة');
     tot['رصيد آخر الفترة'] = sum('رصيد آخر الفترة');
     move.push(tot);
@@ -4868,6 +4939,98 @@ document.addEventListener('click', (e)=>{
 ['invFileClose'].forEach(id=> document.getElementById(id).addEventListener('click', ()=> document.getElementById('invFileOverlay').classList.remove('show')));
 document.getElementById('invFileOverlay').addEventListener('click', (e)=>{ if(e.target.id === 'invFileOverlay') e.currentTarget.classList.remove('show'); });
 /* ==== INVOICE FILES JS END ==== */
+/* ==== CREDIT NOTES JS START ==== */
+// مرتجعات الموردين (إشعارات دائنة): بتقلل رصيد المورد — على فاتورة معيّنة أو تحت الحساب
+let apCredits = [];   // {id, supplier, date, number, amount, vatRate, total, invoiceId, reason, items}
+let cnMissing = false;
+async function cnLoad(){
+  apCredits = []; cnMissing = false;
+  if(!currentWorkspace) return;
+  const { data, error } = await sb.from('supplier_credit_notes').select('id, supplier_name, note_date, note_number, amount, vat_rate, total, invoice_id, reason, items').eq('workspace_id', currentWorkspace.id);
+  if(error){ if(/relation|does not exist|schema cache|Could not find/i.test(error.message||'')) cnMissing = true; else console.error(error); return; }
+  apCredits = (data||[]).map(r=> ({ id: r.id, supplier: r.supplier_name, date: r.note_date, number: r.note_number || '', amount: Number(r.amount)||0, vatRate: Number(r.vat_rate), total: Number(r.total)||0, invoiceId: r.invoice_id || null, reason: r.reason || '', items: r.items || null }));
+}
+async function cnInsert(o){
+  const { data, error } = await sb.from('supplier_credit_notes').insert({
+    workspace_id: currentWorkspace.id, supplier_name: o.supplier, note_date: o.date, note_number: o.number || null,
+    amount: apR(o.amount), vat_rate: o.vatRate, total: apR(o.total), invoice_id: o.invoiceId || null, reason: o.reason || null, items: o.items || null
+  }).select().single();
+  if(error) throw error;
+  return data.id;
+}
+function cnFindInvoice(supplier, number){
+  if(!number) return null;
+  const k = normalizeInvoiceNumber(number);
+  return invoices.find(i=> i.store === supplier && i.invoiceNumber && normalizeInvoiceNumber(i.invoiceNumber) === k) || null;
+}
+
+// ---------- نافذة تسجيل مرتجع ----------
+function cnOpen(supplier){
+  if(cnMissing){ alert('المرتجعات محتاجة خطوة واحدة: شغّل ملف supabase-schema-v20-credit-notes.sql في Supabase ← SQL Editor، وبعدين حدّث الصفحة.'); return; }
+  const sel = document.getElementById('cnSupplier');
+  const list = apSuppliersForPayment();
+  sel.innerHTML = `<option value="">اختار المورد</option>` + list.map(s=> `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  sel.value = supplier && list.includes(supplier) ? supplier : '';
+  document.getElementById('cnDate').value = apToday();
+  ['cnNumber','cnAmount','cnReason'].forEach(id=> document.getElementById(id).value = '');
+  document.getElementById('cnVat').value = supplier && supplierVatRatesMap.has(supplier) ? supplierVatRatesMap.get(supplier) : 5;
+  document.getElementById('cnErr').textContent = '';
+  cnFillInvoices(); cnCalc();
+  document.getElementById('cnOverlay').classList.add('show');
+}
+function cnFillInvoices(){
+  const supplier = document.getElementById('cnSupplier').value;
+  const s = supplier ? apCompute('9999-12-31').get(supplier) : null;
+  const rows = s ? s.invoices.slice().sort((a,b)=> (b.inv.date||'').localeCompare(a.inv.date||'')) : [];
+  document.getElementById('cnInvoice').innerHTML = `<option value="">— مش مربوط بفاتورة (يتخصم من الرصيد) —</option>` +
+    rows.map(r=> `<option value="${escapeHtml(String(r.inv.id))}">#${escapeHtml(r.inv.invoiceNumber||'بدون رقم')} · ${escapeHtml(r.inv.date||'')} · ${apFmt(r.total)}${r.open > 0.004 ? ' · متبقي ' + apFmt(r.open) : ' · مدفوعة'}</option>`).join('');
+  if(supplier && supplierVatRatesMap.has(supplier)) document.getElementById('cnVat').value = supplierVatRatesMap.get(supplier);
+}
+function cnCalc(){
+  const a = parseFloat(String(document.getElementById('cnAmount').value).replace(/,/g,''));
+  const v = parseFloat(document.getElementById('cnVat').value);
+  const ok = !isNaN(a) && a > 0;
+  const rate = isNaN(v) ? 5 : v;
+  document.getElementById('cnTotal').textContent = ok ? `الضريبة ${apFmt(a*rate/100)} · الإجمالي ${apFmt(a*(1+rate/100))}` : '';
+}
+async function cnSave(){
+  const err = document.getElementById('cnErr'); err.textContent = '';
+  const supplier = document.getElementById('cnSupplier').value;
+  const date = document.getElementById('cnDate').value;
+  const amount = parseFloat(String(document.getElementById('cnAmount').value).replace(/,/g,''));
+  const vr = parseFloat(document.getElementById('cnVat').value); const rate = isNaN(vr) ? 5 : vr;
+  const number = document.getElementById('cnNumber').value.trim();
+  if(!supplier) return err.textContent = 'اختار المورد.';
+  if(!date) return err.textContent = 'اكتب التاريخ.';
+  if(!(amount > 0)) return err.textContent = 'اكتب قيمة المرتجع قبل الضريبة.';
+  if(number && apCredits.some(c=> c.supplier === supplier && c.number && normalizeInvoiceNumber(c.number) === normalizeInvoiceNumber(number))) return err.textContent = 'المرتجع ده متسجل قبل كده بنفس الرقم.';
+  const btn = document.getElementById('cnSave'); btn.disabled = true; btn.textContent = 'جاري الحفظ...';
+  try{
+    await cnInsert({ supplier, date, number, amount, vatRate: rate, total: amount*(1+rate/100), invoiceId: document.getElementById('cnInvoice').value || null, reason: document.getElementById('cnReason').value.trim() });
+    document.getElementById('cnOverlay').classList.remove('show');
+    await cnLoad(); ap.supplier = supplier; apRender();
+  }catch(e){ console.error(e); err.textContent = 'فشل الحفظ: ' + (e.message || e); }
+  finally{ btn.disabled = false; btn.textContent = 'حفظ المرتجع'; }
+}
+async function cnDelete(id){
+  const c = apCredits.find(x=> String(x.id) === String(id)); if(!c) return;
+  if(!confirm(`حذف المرتجع ${c.number ? '#' + c.number + ' ' : ''}بقيمة ${apFmt(c.total)}؟`)) return;
+  const { error } = await sb.from('supplier_credit_notes').delete().eq('id', c.id);
+  if(error){ alert('فشل الحذف: ' + error.message); return; }
+  await cnLoad(); apRender();
+}
+document.getElementById('cnSupplier').addEventListener('change', ()=>{ cnFillInvoices(); cnCalc(); });
+['cnAmount','cnVat'].forEach(id=> document.getElementById(id).addEventListener('input', cnCalc));
+document.getElementById('cnSave').addEventListener('click', cnSave);
+['cnClose','cnCancel'].forEach(id=> document.getElementById(id).addEventListener('click', ()=> document.getElementById('cnOverlay').classList.remove('show')));
+document.getElementById('apRoot').addEventListener('click', (e)=>{
+  const t = e.target.closest('[data-ap="credit"],[data-delcn]'); if(!t) return;
+  if(t.dataset.delcn) return cnDelete(t.dataset.delcn);
+  cnOpen(ap.supplier);
+});
+window.__apDebug = { apCompute, apToday };
+/* ==== CREDIT NOTES JS END ==== */
+
 
 
 
