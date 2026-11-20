@@ -452,6 +452,12 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 .dh-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .dh-acts .ap-btn{padding:5px 10px;font-size:12px;}
 /* ==== DATA HEALTH CSS END ==== */
+.inv-file-btn{background:none;border:1px solid var(--line);border-radius:4px;color:var(--pine-deep);font-family:inherit;font-size:12px;padding:3px 8px;cursor:pointer;white-space:nowrap;}
+.inv-file-btn:hover{background:var(--white);border-color:var(--pine);}
+.inv-file-page{margin-bottom:14px;}
+.inv-file-page img{width:100%;display:block;border:1px solid var(--line);border-radius:4px;background:#fff;}
+.inv-file-pno{font-size:12px;color:var(--ink-soft);margin-bottom:4px;}
+
 
 </style>
 </head>
@@ -760,7 +766,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 <div class="overlay" id="editInvoiceOverlay">
   <div class="modal">
     <button class="modal-close" id="closeEditInvoiceBtn">×</button>
-    <h2>تعديل الفاتورة</h2>
+    <h2 style="display:flex;align-items:center;gap:10px;">تعديل الفاتورة <span id="editInvoiceFileBtn"></span></h2>
     <div class="field-row">
       <div class="field"><label>اسم المورد/المتجر</label><input type="text" id="editStoreField"></div>
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" id="editDateField"></div>
@@ -847,6 +853,15 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 
 <datalist id="existingProducts"></datalist>
 
+<!-- ==== INVOICE FILES HTML START ==== -->
+<div class="overlay" id="invFileOverlay">
+  <div class="modal" style="max-width:900px;">
+    <button class="modal-close" id="invFileClose">×</button>
+    <h2 id="invFileTitle" dir="auto">صورة الفاتورة</h2>
+    <div id="invFileBody"></div>
+  </div>
+</div>
+<!-- ==== INVOICE FILES HTML END ==== -->
 <!-- ==== PAYABLES MODALS START ==== -->
 <div class="overlay" id="apPayOverlay">
   <div class="modal" style="max-width:720px;">
@@ -1454,6 +1469,7 @@ async function refreshInvoicesFromServer(){
     }))
   }));
   await apLoad();
+  await invFilesLoad();
 }
 
 async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, paymentType){
@@ -1476,6 +1492,7 @@ async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, p
   return invRow.id;
 }
 async function deleteInvoiceRemote(id){
+  await invFilesRemove(id);
   const { error } = await sb.from('invoices').delete().eq('id', id);
   if(error) console.error(error);
 }
@@ -2598,6 +2615,7 @@ function renderHistory(){
           <div class="sub">${inv.invoiceNumber ? `فاتورة رقم ${escapeHtml(inv.invoiceNumber)} · ` : ''}${escapeHtml(inv.date || 'بدون تاريخ')} · ${itemCount} صنف</div>
         </div>
         <div style="display:flex;align-items:center;gap:14px;">
+          ${invFileBtn(inv.id)}
           <div class="mono">${fmtPrice(total)} ${escapeHtml(settings.currency)}</div>
           ${isOwner ? `<button class="edit-invoice-btn" data-editid="${inv.id}" style="background:none;border:none;color:var(--pine-deep);cursor:pointer;font-family:inherit;font-size:13px;">تعديل</button>
           <button class="btn-danger-text" data-id="${inv.id}">حذف</button>` : ''}
@@ -2981,6 +2999,7 @@ function openEditInvoice(id){
   els.editItemsBody.innerHTML = (inv.items && inv.items.length ? inv.items : [{name:'',barcode:'',destination:'',price:'',qty:1,unit:''}])
     .map(itemRowHtml).join('');
   els.editInvoiceStatus.innerHTML = '';
+  document.getElementById('editInvoiceFileBtn').innerHTML = invFileBtn(inv.id, 'شوف صورة الفاتورة');
   els.editInvoiceOverlay.classList.add('show');
 }
 els.closeEditInvoiceBtn.addEventListener('click', ()=> els.editInvoiceOverlay.classList.remove('show'));
@@ -4125,12 +4144,14 @@ async function ixSaveAll(){
   const list = ix.invs.filter(ixSavable);
   if(!list.length) return;
   ix.saving = true; ixRenderTop();
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, imgFail = 0;
   for(const v of list){
     const items = ixValidItems(v).map(it=>({ name: it.name.trim(), barcode: (it.barcode||'').trim(), price: ixNum(it.price), qty: ixNum(it.qty) || 1, unit: (it.unit||'').trim(), destination: (it.destination||'').trim() }));
     try{
-      await insertInvoiceRemote(v.store.trim(), v.date || '', items, ixVatRate(v), (v.invoiceNumber||'').trim(), v.paymentType || '');
+      const newId = await insertInvoiceRemote(v.store.trim(), v.date || '', items, ixVatRate(v), (v.invoiceNumber||'').trim(), v.paymentType || '');
       v.saved = true; v.saveError = ''; ok++;
+      const imgs = v.pageIds.map(id=> ix.pages.find(p=> p.id === id)).filter(Boolean).map(p=> p.img);
+      if(imgs.length && !(await invFilesUpload(newId, imgs))) imgFail++;
     }catch(e){ console.error(e); v.saveError = e.message || String(e); fail++; }
     ixRenderSide(); ixRenderTop();
   }
@@ -4140,6 +4161,7 @@ async function ixSaveAll(){
   ixRenderAll();
   const left = ix.invs.filter(v=> !v.saved && !v.skipped).length;
   ixToast(`✓ اتحفظت ${ok} فاتورة` + (fail ? ` — فشل ${fail}` : '') + (left ? ` — فاضل ${left} محتاجين مراجعة` : ''));
+  if(imgFail) ixBanner(invFilesMissing ? 'الفواتير اتحفظت، بس صورها ما اتحفظتش لأن تخزين الصور لسه مش متفعّل — شغّل ملف supabase-schema-v19-invoice-files.sql في Supabase.' : `الفواتير اتحفظت، بس صور ${imgFail} فاتورة ما اتحفظتش — جرّب تاني بعدين.`);
 }
 
 ixEl('ixCloseBtn').addEventListener('click', ixClose);
@@ -4357,7 +4379,7 @@ function apRender(){
       <thead><tr><th>المورد</th><th>رقم الفاتورة</th><th>تاريخ الفاتورة</th><th>تاريخ الاستحقاق</th><th class="n">قيمة الفاتورة</th><th class="n">المتبقي</th><th>الحالة</th></tr></thead>
       <tbody>${dueRows.length ? dueRows.slice(0,200).map(r=> `<tr class="click" data-sup="${escapeHtml(r.supplier)}">
         <td class="sup" dir="auto">${escapeHtml(r.supplier)}</td>
-        <td class="mono">${escapeHtml(r.inv.invoiceNumber||'—')}</td>
+        <td class="mono">${escapeHtml(r.inv.invoiceNumber||'—')} ${invFileBtn(r.inv.id,'')}</td>
         <td>${escapeHtml(r.inv.date||'—')}</td>
         <td>${escapeHtml(r.due||'—')}</td>
         <td class="n">${apFmt(r.total)}</td>
@@ -4414,7 +4436,7 @@ function apRenderSupplier(root){
     <div class="ap-sec"><h4>الفواتير المفتوحة</h4><span class="hint2">${openInv.length} فاتورة عليها مبالغ</span></div>
     <div class="ap-scroll"><table class="ap-table">
       <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th class="n">قيمة الفاتورة</th><th class="n">المدفوع</th><th class="n">المتبقي</th><th>الحالة</th></tr></thead>
-      <tbody>${openInv.length ? openInv.map(r=> `<tr><td class="mono">${escapeHtml(r.inv.invoiceNumber||'—')}</td><td>${escapeHtml(r.inv.date||'—')}</td><td>${escapeHtml(r.due||'—')}</td><td class="n">${apFmt(r.total)}</td><td class="n">${apCell(r.paid)}</td><td class="n"><b>${apFmt(r.open)}</b></td><td>${apStatusPill(r)}</td></tr>`).join('')
+      <tbody>${openInv.length ? openInv.map(r=> `<tr><td class="mono">${escapeHtml(r.inv.invoiceNumber||'—')} ${invFileBtn(r.inv.id,'')}</td><td>${escapeHtml(r.inv.date||'—')}</td><td>${escapeHtml(r.due||'—')}</td><td class="n">${apFmt(r.total)}</td><td class="n">${apCell(r.paid)}</td><td class="n"><b>${apFmt(r.open)}</b></td><td>${apStatusPill(r)}</td></tr>`).join('')
         : `<tr><td colspan="7"><div class="ap-empty">كل فواتير المورد ده مدفوعة.</div></td></tr>`}</tbody>
     </table></div>
     <div class="ap-sec"><h4>كشف الحساب</h4><span class="hint2">دائن = فواتير علينا للمورد · مدين = مدفوعات للمورد</span></div>
@@ -4724,7 +4746,7 @@ function dhRender(){
       </button>
       ${n && dh.open.has(key) ? `<div class="dh-body">${body}</div>` : ''}
     </div>`;
-  const invRow = (inv, extra='', actions='')=> `<div class="dh-row"><div class="dh-main"><span dir="auto">${escapeHtml(dhInvLabel(inv))}</span>${extra ? `<small>${extra}</small>` : ''}</div><div class="dh-acts">${act(`<button class="ap-btn" data-edit="${escapeHtml(String(inv.id))}">فتح وتعديل</button>`)}${actions}</div></div>`;
+  const invRow = (inv, extra='', actions='')=> `<div class="dh-row"><div class="dh-main"><span dir="auto">${escapeHtml(dhInvLabel(inv))}</span>${extra ? `<small>${extra}</small>` : ''}</div><div class="dh-acts">${invFileBtn(inv.id)}${act(`<button class="ap-btn" data-edit="${escapeHtml(String(inv.id))}">فتح وتعديل</button>`)}${actions}</div></div>`;
 
   root.innerHTML = `
     <div class="ap-head"><h3>فحص البيانات</h3><span class="ap-terms">${total ? `${total} مشكلة محتاجة تتصلح عشان الأرقام تبقى موثوقة` : 'البيانات نضيفة ✓'}</span></div>
@@ -4775,6 +4797,78 @@ els.healthView = document.getElementById('healthView');
 TAB_VIEWS.push({ btn: 'tabHealthBtn', view: 'healthView' });
 els.tabHealthBtn.addEventListener('click', ()=> switchTab('tabHealthBtn', dhRender));
 /* ==== DATA HEALTH JS END ==== */
+/* ==== INVOICE FILES JS START ==== */
+// صورة الفاتورة الأصلية: بتتحفظ مع الفاتورة وتتفتح من أي مكان فيه الفاتورة
+let invFiles = new Map();   // invoiceId -> [{path, page}]
+let invFilesMissing = false;
+async function invFilesLoad(){
+  invFiles = new Map(); invFilesMissing = false;
+  if(!currentWorkspace) return;
+  const { data, error } = await sb.from('invoice_files').select('invoice_id, path, page').eq('workspace_id', currentWorkspace.id);
+  if(error){ if(/relation|does not exist|schema cache|Could not find/i.test(error.message||'')) invFilesMissing = true; else console.error(error); return; }
+  (data||[]).forEach(r=>{ if(!invFiles.has(r.invoice_id)) invFiles.set(r.invoice_id, []); invFiles.get(r.invoice_id).push({ path: r.path, page: r.page }); });
+  invFiles.forEach(list=> list.sort((a,b)=> a.page - b.page));
+}
+function b64ToBlob(b64, type){
+  const bin = atob(b64); const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: type || 'image/jpeg' });
+}
+// بترجع true لو الصور اتحفظت
+async function invFilesUpload(invoiceId, images){
+  if(invFilesMissing || !images || !images.length) return false;
+  const rows = [];
+  for(let i=0;i<images.length;i++){
+    const path = `${currentWorkspace.id}/${invoiceId}/page-${i+1}.jpg`;
+    const { error } = await sb.storage.from('invoice-files').upload(path, b64ToBlob(images[i]), { contentType:'image/jpeg', upsert:true });
+    if(error){ console.error(error); if(/bucket not found|not found/i.test(error.message||'')) invFilesMissing = true; return false; }
+    rows.push({ invoice_id: invoiceId, workspace_id: currentWorkspace.id, path, page: i+1 });
+  }
+  const { error } = await sb.from('invoice_files').insert(rows);
+  if(error){ console.error(error); return false; }
+  invFiles.set(invoiceId, rows.map(r=> ({ path: r.path, page: r.page })));
+  return true;
+}
+async function invFilesRemove(invoiceId){
+  const list = invFiles.get(invoiceId);
+  if(!list || !list.length) return;
+  try{ await sb.storage.from('invoice-files').remove(list.map(f=> f.path)); }catch(e){ console.error(e); }
+  invFiles.delete(invoiceId);
+}
+function invHasFiles(invoiceId){ return invFiles.has(invoiceId); }
+function invFileBtn(invoiceId, label){
+  return invHasFiles(invoiceId) ? `<button class="inv-file-btn" data-viewfile="${escapeHtml(String(invoiceId))}" title="صورة الفاتورة الأصلية">📄 ${label || 'الصورة'}</button>` : '';
+}
+async function openInvoiceFiles(invoiceId){
+  const inv = invoices.find(i=> String(i.id) === String(invoiceId));
+  const list = invFiles.get(inv ? inv.id : invoiceId) || [];
+  const ov = document.getElementById('invFileOverlay');
+  const body = document.getElementById('invFileBody');
+  document.getElementById('invFileTitle').textContent = inv ? `${inv.store || ''}${inv.invoiceNumber ? ' — #' + inv.invoiceNumber : ''}${inv.date ? ' — ' + inv.date : ''}` : 'صورة الفاتورة';
+  body.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري تحميل الصورة...</div>`;
+  ov.classList.add('show');
+  try{
+    const urls = [];
+    for(const f of list){
+      const { data, error } = await sb.storage.from('invoice-files').createSignedUrl(f.path, 3600);
+      if(error) throw error;
+      urls.push(data.signedUrl);
+    }
+    body.innerHTML = urls.length ? urls.map((u,i)=> `<div class="inv-file-page">${urls.length > 1 ? `<div class="inv-file-pno">صفحة ${i+1} من ${urls.length}</div>` : ''}<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="صفحة ${i+1}"></a></div>`).join('')
+      : `<div class="empty-state">مفيش صورة محفوظة للفاتورة دي.</div>`;
+  }catch(e){
+    console.error(e);
+    body.innerHTML = `<div class="error-box">تعذّر تحميل الصورة: ${escapeHtml(e.message || String(e))}</div>`;
+  }
+}
+document.addEventListener('click', (e)=>{
+  const b = e.target.closest('[data-viewfile]');
+  if(b){ e.preventDefault(); e.stopPropagation(); openInvoiceFiles(b.dataset.viewfile); }
+}, true);
+['invFileClose'].forEach(id=> document.getElementById(id).addEventListener('click', ()=> document.getElementById('invFileOverlay').classList.remove('show')));
+document.getElementById('invFileOverlay').addEventListener('click', (e)=>{ if(e.target.id === 'invFileOverlay') e.currentTarget.classList.remove('show'); });
+/* ==== INVOICE FILES JS END ==== */
+
 
 
 
