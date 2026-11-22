@@ -452,6 +452,27 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 .dh-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .dh-acts .ap-btn{padding:5px 10px;font-size:12px;}
 /* ==== DATA HEALTH CSS END ==== */
+.pv-toggle{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;font-weight:400;}
+.pv-toggle button{background:var(--paper-raised);border:none;border-left:1px solid var(--line);font-family:inherit;font-size:12px;padding:5px 10px;cursor:pointer;color:var(--ink-soft);}
+.pv-toggle button:last-child{border-left:none;}
+.pv-toggle button.on{background:var(--pine-deep);color:var(--white);}
+.pm-wrap{overflow:auto;border:1px solid var(--line);border-radius:6px;background:var(--paper-raised);max-height:72vh;}
+.pm-table{border-collapse:separate;border-spacing:0;font-size:13px;min-width:100%;}
+.pm-table th{position:sticky;top:0;background:var(--paper);z-index:2;font-size:11px;font-weight:600;color:var(--ink-soft);padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;}
+.pm-table td{padding:8px 10px;border-bottom:1px solid var(--line-soft);white-space:nowrap;}
+.pm-table td.n,.pm-table th.n{text-align:left;font-family:'JetBrains Mono',monospace;direction:ltr;}
+.pm-table th.n{font-family:inherit;}
+.pm-table .sticky{position:sticky;right:0;background:var(--paper-raised);z-index:1;max-width:280px;overflow:hidden;text-overflow:ellipsis;font-weight:600;border-left:1px solid var(--line-soft);}
+.pm-table th.sticky{z-index:3;background:var(--paper);}
+.pm-table tbody tr{cursor:pointer;}
+.pm-table tbody tr:hover td{background:var(--white);}
+.pm-table .sup{color:var(--ink-soft);font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;}
+.pm-up{color:var(--brick);}
+.pm-down{color:#2E7D4F;}
+.pm-empty{color:var(--line);}
+.pm-note{font-size:12px;color:var(--ink-soft);margin:0 0 8px;}
+@media (max-width:600px){ .pm-table .sticky{max-width:130px;font-size:12px;} .pm-table .sup{max-width:120px;} }
+
 
 
 </style>
@@ -507,7 +528,11 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 
   <div id="productsView">
   <div class="section-title">
-    <span>المنتجات</span>
+    <span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">المنتجات
+      <span class="pv-toggle" id="priceViewToggle">
+        <button data-pv="cards">آخر سعر</button><button data-pv="months">شهر بشهر</button><button data-pv="months-sup">شهر بشهر حسب المورد</button>
+      </span>
+    </span>
     <span style="display:flex;align-items:center;gap:12px;">
       <button id="selectAllVisibleBtn" style="background:none;border:none;color:var(--pine-deep);font-size:12px;cursor:pointer;font-family:inherit;">تحديد الكل الظاهر</button>
       <span id="productCount" style="font-weight:400;"></span>
@@ -1592,6 +1617,71 @@ function populateDestinationFilter(){
   els.existingDestinations.innerHTML = dests.map(d=> `<option value="${escapeHtml(d)}">`).join('');
 }
 
+// ---------- عرض الأسعار شهر بشهر داخل البرنامج ----------
+let priceView = 'cards';
+try{ priceView = localStorage.getItem('priceView') || 'cards'; }catch(_){}
+function monthlyUnitPrices(points){
+  // المتوسط المرجّح بالكمية في كل شهر = إجمالي المبالغ ÷ إجمالي الكميات
+  const m = new Map();
+  points.forEach(p=>{
+    if(!p.date || !(p.unitPrice > 0)) return;
+    const k = p.date.slice(0,7);
+    const o = m.get(k) || { amt:0, q:0 };
+    o.amt += p.price; o.q += p.price / p.unitPrice; m.set(k, o);
+  });
+  const out = new Map(); m.forEach((o,k)=>{ if(o.q > 0) out.set(k, o.amt / o.q); }); return out;
+}
+const MONTH_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+function monthLabel(k){ const [y,m] = k.split('-'); return `${MONTH_AR[Number(m)-1]} ${y.slice(2)}`; }
+function renderPriceMonths(entries, supplierFilter){
+  const bySup = priceView === 'months-sup';
+  const rows = [];
+  entries.forEach(([key, entry])=>{
+    const pts = supplierFilter ? entry.points.filter(p=> p.store === supplierFilter) : entry.points;
+    if(bySup){
+      const g = new Map(); pts.forEach(p=>{ const s = p.store || 'بدون مورد'; if(!g.has(s)) g.set(s, []); g.get(s).push(p); });
+      [...g.entries()].sort((a,b)=> a[0].localeCompare(b[0])).forEach(([sup, sp])=> rows.push({ key, entry, sup, m: monthlyUnitPrices(sp) }));
+    } else {
+      const last = new Map(); pts.forEach(p=>{ const s = p.store || 'بدون مورد'; if(!last.has(s) || (p.date||'') > last.get(s)) last.set(s, p.date||''); });
+      rows.push({ key, entry, sup: [...last.entries()].sort((a,b)=> b[1].localeCompare(a[1])).map(x=> x[0]).join('، '), m: monthlyUnitPrices(pts) });
+    }
+  });
+  const months = [...new Set(rows.flatMap(r=> [...r.m.keys()]))].sort();
+  if(!months.length){ els.productList.innerHTML = `<div class="empty-state">مفيش أسعار بتواريخ للعرض.</div>`; return; }
+  const f = (n)=> fmtPrice(Math.round(n*100)/100);
+  els.productList.innerHTML = `
+    <p class="pm-note">سعر الوحدة قبل الضريبة. لو الصنف اتشرى أكتر من مرة في الشهر بيظهر المتوسط المرجّح بالكمية. <span class="pm-up">أحمر</span> = أغلى من الشهر اللي قبله، <span class="pm-down">أخضر</span> = أرخص. الفلاتر اللي فوق شغالة على الجدول. اضغط على أي صف عشان تشوف تفاصيل الصنف.</p>
+    <div class="pm-wrap"><table class="pm-table">
+      <thead><tr><th class="sticky">الصنف</th><th>${bySup ? 'المورد' : 'الموردين'}</th><th>الوحدة</th>${months.map(k=> `<th class="n">${monthLabel(k)}</th>`).join('')}<th class="n">أقل</th><th class="n">أعلى</th><th class="n">التغيير</th></tr></thead>
+      <tbody>${rows.filter(r=> r.m.size).map(r=>{
+        let prev = null; const vals = [];
+        const cells = months.map(k=>{
+          const v = r.m.get(k);
+          if(v === undefined) return `<td class="n pm-empty">—</td>`;
+          const cls = prev === null ? '' : (v > prev * 1.005 ? 'pm-up' : (v < prev * 0.995 ? 'pm-down' : ''));
+          prev = v; vals.push(v);
+          return `<td class="n ${cls}">${f(v)}</td>`;
+        }).join('');
+        const ch = vals.length > 1 && vals[0] > 0 ? (vals[vals.length-1] - vals[0]) / vals[0] * 100 : null;
+        return `<tr data-pmkey="${escapeHtml(r.key)}">
+          <td class="sticky" dir="auto" title="${escapeHtml(r.entry.displayName)}">${escapeHtml(r.entry.displayName)}</td>
+          <td class="sup" dir="auto" title="${escapeHtml(r.sup)}">${escapeHtml(r.sup)}</td>
+          <td>${escapeHtml(r.entry.unit || '')}</td>${cells}
+          <td class="n">${f(Math.min(...vals))}</td><td class="n">${f(Math.max(...vals))}</td>
+          <td class="n ${ch === null ? '' : (ch > 0.5 ? 'pm-up' : (ch < -0.5 ? 'pm-down' : ''))}">${ch === null ? '—' : (ch > 0 ? '+' : '') + ch.toFixed(1) + '%'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  els.productList.querySelectorAll('tr[data-pmkey]').forEach(tr=> tr.addEventListener('click', ()=> openDetail(tr.dataset.pmkey, lastProductMap.get(tr.dataset.pmkey))));
+}
+function syncPriceViewToggle(){ document.querySelectorAll('#priceViewToggle button').forEach(b=> b.classList.toggle('on', b.dataset.pv === priceView)); const sa = document.getElementById('selectAllVisibleBtn'); if(sa) sa.style.display = priceView === 'cards' ? '' : 'none'; }
+document.getElementById('priceViewToggle').addEventListener('click', (e)=>{
+  const b = e.target.closest('[data-pv]'); if(!b) return;
+  priceView = b.dataset.pv; try{ localStorage.setItem('priceView', priceView); }catch(_){}
+  syncPriceViewToggle(); renderDashboard();
+});
+syncPriceViewToggle();
+
 function renderDashboard(){
   const map = getProductSeries();
   lastProductMap = map;
@@ -1628,6 +1718,7 @@ function renderDashboard(){
     return;
   }
 
+  if(priceView !== 'cards'){ renderPriceMonths(entries, supplierFilter); return; }
   els.productList.innerHTML = entries.map(([key, entry])=>{
     const points = entry.points;
     const last = points[points.length-1];
