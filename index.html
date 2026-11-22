@@ -548,6 +548,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       <span class="pv-toggle" id="priceViewToggle">
         <button data-pv="cards">آخر سعر</button><button data-pv="months">شهر بشهر</button><button data-pv="months-sup">شهر بشهر حسب المورد</button>
       </span>
+      <label id="pvBaseWrap" style="font-size:12px;font-weight:400;display:none;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="pvBase"> بسعر الكيلو / اللتر</label>
     </span>
     <span style="display:flex;align-items:center;gap:12px;">
       <button id="selectAllVisibleBtn" style="background:none;border:none;color:var(--pine-deep);font-size:12px;cursor:pointer;font-family:inherit;">تحديد الكل الظاهر</button>
@@ -855,6 +856,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       </div>
       <div id="detailDestinationHint" style="font-size:11px;color:var(--ink-soft);margin-top:4px;"></div>
     </div>
+    <div class="field" id="detailPackBox" style="margin-bottom:14px;"></div>
     <div class="chart-wrap"><canvas id="detailChart"></canvas></div>
     <div id="detailSupplierComp"></div>
     <div class="section-title" style="margin-top:6px;"><span>كل الأسعار المسجّلة</span></div>
@@ -1477,6 +1479,7 @@ async function refreshInvoicesFromServer(){
   }));
   if(typeof loadReceiptNumbers === 'function') await loadReceiptNumbers();
   if(typeof siLoad === 'function') await siLoad();
+  if(typeof packsLoad === 'function') await packsLoad();
 }
 
 async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, paymentType){
@@ -1708,11 +1711,17 @@ function renderPriceMonths(entries, supplierFilter){
       rows.push({ key, entry, sup: [...last.entries()].sort((a,b)=> b[1].localeCompare(a[1])).map(x=> x[0]).join('، '), m: monthlyUnitPrices(pts) });
     }
   });
+  // بسعر الكيلو/اللتر: كل الأسعار تتقسم على محتوى العبوة
+  rows.forEach(r=>{
+    r.pack = packFor(r.key, r.entry);
+    if(pvBase && r.pack && r.pack.amount > 0){ const m2 = new Map(); r.m.forEach((v,k)=> m2.set(k, v / r.pack.amount)); r.m = m2; r.shownUnit = r.pack.base; }
+    else r.shownUnit = r.entry.unit || '';
+  });
   const months = [...new Set(rows.flatMap(r=> [...r.m.keys()]))].sort();
   if(!months.length){ els.productList.innerHTML = `<div class="empty-state">مفيش أسعار بتواريخ للعرض.</div>`; return; }
   const f = (n)=> fmtPrice(Math.round(n*100)/100);
   els.productList.innerHTML = `
-    <p class="pm-note">سعر الوحدة قبل الضريبة. لو الصنف اتشرى أكتر من مرة في الشهر بيظهر المتوسط المرجّح بالكمية. <span class="pm-up">أحمر</span> = أغلى من الشهر اللي قبله، <span class="pm-down">أخضر</span> = أرخص. الفلاتر اللي فوق شغالة على الجدول. اضغط على أي صف عشان تشوف تفاصيل الصنف.</p>
+    <p class="pm-note">${pvBase ? '<b>السعر لكل كيلو/لتر/حبة</b> (الأصناف اللي محتوى عبوتها معروف). ' : 'سعر الوحدة (العبوة) قبل الضريبة. '} لو الصنف اتشرى أكتر من مرة في الشهر بيظهر المتوسط المرجّح بالكمية. <span class="pm-up">أحمر</span> = أغلى من الشهر اللي قبله، <span class="pm-down">أخضر</span> = أرخص. الفلاتر اللي فوق شغالة على الجدول. اضغط على أي صف عشان تشوف تفاصيل الصنف.</p>
     <div class="pm-wrap"><table class="pm-table">
       <thead><tr><th class="sticky">الصنف</th><th>${bySup ? 'المورد' : 'الموردين'}</th><th>الوحدة</th>${months.map(k=> `<th class="n">${monthLabel(k)}</th>`).join('')}<th class="n">أقل</th><th class="n">أعلى</th><th class="n">التغيير</th></tr></thead>
       <tbody>${rows.filter(r=> r.m.size).map(r=>{
@@ -1728,7 +1737,7 @@ function renderPriceMonths(entries, supplierFilter){
         return `<tr data-pmkey="${escapeHtml(r.key)}">
           <td class="sticky" dir="auto" title="${escapeHtml(r.entry.displayName)}">${escapeHtml(r.entry.displayName)}</td>
           <td class="sup" dir="auto" title="${escapeHtml(r.sup)}">${escapeHtml(r.sup)}</td>
-          <td>${escapeHtml(r.entry.unit || '')}</td>${cells}
+          <td>${escapeHtml(r.shownUnit)}${r.pack && !pvBase ? `<div style="font-size:10px;color:var(--ink-soft);">${escapeHtml(packLabel(r.pack))}</div>` : ''}</td>${cells}
           <td class="n">${f(Math.min(...vals))}</td><td class="n">${f(Math.max(...vals))}</td>
           <td class="n ${ch === null ? '' : (ch > 0.5 ? 'pm-up' : (ch < -0.5 ? 'pm-down' : ''))}">${ch === null ? '—' : (ch > 0 ? '+' : '') + ch.toFixed(1) + '%'}</td>
         </tr>`;
@@ -1736,7 +1745,11 @@ function renderPriceMonths(entries, supplierFilter){
     </table></div>`;
   els.productList.querySelectorAll('tr[data-pmkey]').forEach(tr=> tr.addEventListener('click', ()=> openDetail(tr.dataset.pmkey, lastProductMap.get(tr.dataset.pmkey))));
 }
-function syncPriceViewToggle(){ document.querySelectorAll('#priceViewToggle button').forEach(b=> b.classList.toggle('on', b.dataset.pv === priceView)); const sa = document.getElementById('selectAllVisibleBtn'); if(sa) sa.style.display = priceView === 'cards' ? '' : 'none'; }
+let pvBase = false;
+try{ pvBase = localStorage.getItem('pvBase') === '1'; }catch(_){}
+document.getElementById('pvBase').checked = pvBase;
+document.getElementById('pvBase').addEventListener('change', (e)=>{ pvBase = e.target.checked; try{ localStorage.setItem('pvBase', pvBase ? '1' : '0'); }catch(_){} renderDashboard(); });
+function syncPriceViewToggle(){ document.getElementById('pvBaseWrap').style.display = priceView === 'cards' ? 'none' : 'inline-flex'; document.querySelectorAll('#priceViewToggle button').forEach(b=> b.classList.toggle('on', b.dataset.pv === priceView)); const sa = document.getElementById('selectAllVisibleBtn'); if(sa) sa.style.display = priceView === 'cards' ? '' : 'none'; }
 document.getElementById('priceViewToggle').addEventListener('click', (e)=>{
   const b = e.target.closest('[data-pv]'); if(!b) return;
   priceView = b.dataset.pv; try{ localStorage.setItem('priceView', priceView); }catch(_){}
@@ -1804,7 +1817,7 @@ function renderDashboard(){
       </div>
       <svg class="spark" viewBox="0 0 70 28"><path d="${spark}" fill="none" stroke="var(--pine)" stroke-width="1.6"/></svg>
       ${changeHtml}
-      <div class="price mono">${fmtPrice(last.unitPrice)} ${escapeHtml(settings.currency)}</div>
+      <div class="price mono" style="text-align:left;">${fmtPrice(last.unitPrice)} ${escapeHtml(settings.currency)}${(()=>{ const pk = packFor(key, entry); if(!pk || (pk.amount === 1 && !/[A-Z]/i.test(entry.unit||'') )) return ''; const v = perBasePrice(last.unitPrice, pk); return `<div style="font-size:11px;color:var(--ink-soft);font-weight:400;">${fmtPrice(Math.round(v*100)/100)} / ${escapeHtml(pk.base)} <span style="opacity:.7;">(${escapeHtml(packLabel(pk))})</span></div>`; })()}</div>
     </div>`;
   }).join('');
 
@@ -2854,6 +2867,7 @@ function openDetail(key, entry){
   els.detailDestinationInput.value = directDest || inherited || '';
   els.detailDestinationHint.textContent = (!directDest && inherited) ? `موروثة من المورد — تقدر تحدد جهة خاصة بالمنتج ده وتحفظها` : '';
   els.existingDestinations.innerHTML = [...new Set(destinationsMap.values())].map(d=>`<option value="${escapeHtml(d)}">`).join('');
+  renderDetailPack(key, entry);
 
   els.detailHistory.innerHTML = points.slice().reverse().map(p=>`
     <div class="history-row">
@@ -3529,7 +3543,7 @@ els.exportBtn.addEventListener('click', ()=>{
   // الموردين للصنف: الأحدث شراءً أولًا
   const suppliersOf = (entry)=>{ const last = new Map(); entry.points.forEach(p=>{ const k = p.store || 'بدون مورد'; if(!last.has(k) || (p.date||'') > last.get(k)) last.set(k, p.date||''); }); return [...last.entries()].sort((a,b)=> b[1].localeCompare(a[1])).map(x=> x[0]).join('، '); };
   const byMonthRows = prodMonthly.filter(x=> x.m.size).map(({key, entry, m})=> Object.assign({
-    'المنتج': entry.displayName, 'المورد': suppliersOf(entry), 'الوحدة': entry.unit || '', 'التصنيف': categoriesMap.get(key) || '', 'الجهة': effectiveDestination(key, entry) || ''
+    'المنتج': entry.displayName, 'المورد': suppliersOf(entry), 'الوحدة': entry.unit || '', 'محتوى العبوة': packLabel(packFor(key, entry)), 'آخر سعر لكل كيلو/لتر/حبة': (()=>{ const pk = packFor(key, entry); const l = entry.points[entry.points.length-1]; return pk ? Math.round(l.unitPrice / pk.amount * 100)/100 : ''; })(), 'التصنيف': categoriesMap.get(key) || '', 'الجهة': effectiveDestination(key, entry) || ''
   }, monthCols(m))).sort((a,b)=> a['المنتج'].localeCompare(b['المنتج'],'ar'));
   const bySupRows = supMonthly.filter(x=> x.m.size).map(({entry, sup, m})=> Object.assign({
     'المنتج': entry.displayName, 'المورد': sup, 'الوحدة': entry.unit || ''
@@ -3543,7 +3557,7 @@ els.exportBtn.addEventListener('click', ()=>{
   };
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, fmtSheet(byMonthRows, 5), 'الأسعار شهر بشهر');
+  XLSX.utils.book_append_sheet(wb, fmtSheet(byMonthRows, 7), 'الأسعار شهر بشهر');
   XLSX.utils.book_append_sheet(wb, fmtSheet(bySupRows, 3), 'الأسعار حسب المورد');
   const ws2 = XLSX.utils.json_to_sheet(summaryRows);
   const ws1 = XLSX.utils.json_to_sheet(detailRows);
@@ -4941,6 +4955,84 @@ document.getElementById('rcResult').addEventListener('click', async (e)=>{
   if(t.dataset.rckey){ const k = t.dataset.rckey; rc.open.has(k) ? rc.open.delete(k) : rc.open.add(k); rcRender(); }
 });
 /* ==== RECEIPTS JS END ==== */
+/* ==== PACK SIZE JS START ==== */
+// محتوى العبوة لكل صنف (الكرتونة فيها كام كيلو/لتر/حبة) — عشان سعر الكيلو يتقارن مهما اتغيرت الوحدة
+let packsMap = new Map();   // productKey -> {amount, base}
+let packsMissing = false;
+const PACK_BASES = ['كيلو','لتر','جالون','حبة'];
+async function packsLoad(){
+  packsMap = new Map(); packsMissing = false;
+  if(!currentWorkspace) return;
+  const { data, error } = await sb.from('product_packs').select('product_key, amount, base_unit').eq('workspace_id', currentWorkspace.id);
+  if(error){ packsMissing = /relation|does not exist|schema cache|Could not find/i.test(error.message||''); if(!packsMissing) console.error(error); return; }
+  (data||[]).forEach(r=> packsMap.set(canonStoredKey(r.product_key), { amount: Number(r.amount), base: r.base_unit }));
+}
+// قراءة الحجم من اسم الصنف: "(4X2.5KG)" = 10 كيلو، "12X1LTR" = 12 لتر، "Tahina - 18kg" = 18 كيلو
+function parsePackFromName(name, unit){
+  const u = normName(unit||'').toUpperCase();
+  if(/^(KG|KGS|KILO|كيلو|كجم|كغ|ك)$/.test(u)) return { amount: 1, base: 'كيلو' };
+  if(/^(L|LTR|LITRE|LITER|لتر)$/.test(u)) return { amount: 1, base: 'لتر' };
+  if(/^(GAL|GALLON|جالون)$/.test(u)) return { amount: 1, base: 'جالون' };
+  // مواد التغليف (أكواب/علب/أكياس فاضية) الرقم في اسمها سعة العبوة الفاضية مش محتواها
+  if(/\b(BOTTLE|CUP|CUPS|CONTAINER|BOWL|LID|LIDS|TRAY|BOX|BAGS?|SLEEVE|STICKER|ROLL|WRAP|FOIL|PAPER|CUTLERY|SPOON|GLOVES?)\b|كوب|علبة|غطاء|كيس/i.test(name||'') && !/\b(SUGAR|RICE|FLOUR|SALT|SPICE)\b/i.test(name||'')) return null;
+  const s = ' ' + (name||'').toUpperCase().replace(/،/g,',').replace(/[×*]/g,'X') + ' ';
+  const UNIT = '(KGS?|KILO|كيلو|كجم|GRAMS?|GMS?|GR|G|LTRS?|LITERS?|LITRES?|L|لتر|ML|GALLONS?|GAL|جالون)(?![A-Z\\u0600-\\u06FF])';
+  const conv = (v, un)=>{
+    if(/^(KGS?|KILO|كيلو|كجم)$/.test(un)) return { amount: v, base: 'كيلو' };
+    if(/^(GRAMS?|GMS?|GR|G)$/.test(un)) return { amount: v/1000, base: 'كيلو' };
+    if(/^(LTRS?|LITERS?|LITRES?|L|لتر)$/.test(un)) return { amount: v, base: 'لتر' };
+    if(un === 'ML') return { amount: v/1000, base: 'لتر' };
+    return { amount: v, base: 'جالون' };
+  };
+  let m = s.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*X\\s*(\\d+(?:\\.\\d+)?)\\s*X\\s*(\\d+(?:\\.\\d+)?)\\s*' + UNIT));
+  if(m) return conv(Number(m[1]) * Number(m[2]) * Number(m[3]), m[4]);
+  m = s.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*X\\s*(\\d+(?:\\.\\d+)?)\\s*' + UNIT));
+  if(m) return conv(Number(m[1]) * Number(m[2]), m[3]);
+  m = s.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*' + UNIT));
+  if(m && Number(m[1]) > 0) return conv(Number(m[1]), m[2]);
+  return null;
+}
+function packFor(key, entry){
+  const saved = packsMap.get(key);
+  if(saved && saved.amount > 0) return Object.assign({ auto: false }, saved);
+  if(!entry) return null;
+  const p = parsePackFromName(entry.displayName, entry.unit);
+  return p && p.amount > 0 ? Object.assign({ auto: true }, p) : null;
+}
+function perBasePrice(unitPrice, pack){ return pack && pack.amount > 0 ? unitPrice / pack.amount : null; }
+function packLabel(pack){ if(!pack) return ''; const a = Math.round(pack.amount * 1000) / 1000; return `${a} ${pack.base}`; }
+async function savePack(key, amount, base){
+  if(packsMissing){ alert('محتاج خطوة واحدة: شغّل ملف supabase-schema-v23-pack-sizes.sql في Supabase ← SQL Editor، وبعدين حدّث الصفحة.'); return false; }
+  const { error } = (amount > 0)
+    ? await sb.from('product_packs').upsert({ workspace_id: currentWorkspace.id, product_key: key, amount, base_unit: base })
+    : await sb.from('product_packs').delete().eq('workspace_id', currentWorkspace.id).eq('product_key', key);
+  if(error){ alert('فشل الحفظ: ' + error.message); return false; }
+  if(amount > 0) packsMap.set(key, { amount, base }); else packsMap.delete(key);
+  return true;
+}
+function renderDetailPack(key, entry){
+  const box = document.getElementById('detailPackBox'); if(!box) return;
+  const pk = packFor(key, entry);
+  const last = entry.points[entry.points.length-1];
+  const per = pk ? perBasePrice(last.unitPrice, pk) : null;
+  box.innerHTML = `
+    <label>محتوى العبوة (الـ ${escapeHtml(entry.unit || 'وحدة')} فيها قد إيه)</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="detailPackAmount" class="num" inputmode="decimal" value="${pk ? Math.round(pk.amount*1000)/1000 : ''}" placeholder="مثلًا 18" style="max-width:110px;">
+      <select id="detailPackBase" style="width:auto;max-width:140px;padding:8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;background:var(--white);">${PACK_BASES.map(b=> `<option ${pk && pk.base===b ? 'selected' : ''}>${b}</option>`).join('')}</select>
+      <button class="btn btn-ghost owner-only" id="saveDetailPackBtn">حفظ</button>
+    </div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">${pk ? `${pk.auto ? 'متقري تلقائي من اسم الصنف — صحّحه لو غلط. ' : ''}آخر سعر = <b class="mono">${fmtPrice(Math.round(per*100)/100)}</b> ${escapeHtml(settings.currency)} لكل ${escapeHtml(pk.base)}` : 'اكتب الكرتونة/العبوة فيها كام كيلو أو لتر أو حبة، عشان يظهر سعر الكيلو ويتقارن لو الوحدة اتغيرت.'}</div>`;
+  const btn = document.getElementById('saveDetailPackBtn');
+  if(btn) btn.addEventListener('click', async ()=>{
+    const a = parseFloat(String(document.getElementById('detailPackAmount').value).replace(/,/g,''));
+    btn.disabled = true;
+    if(await savePack(key, isNaN(a) ? 0 : a, document.getElementById('detailPackBase').value)){ renderDetailPack(key, entry); renderAll(); }
+    btn.disabled = false;
+  });
+}
+/* ==== PACK SIZE JS END ==== */
+
 /* ==== SUPPLIER ITEMS JS START ==== */
 // قايمة الأصناف المعتمدة لكل مورد: أي صنف غريب بيتحوّل لأقرب صنف معتمد أو بيتعلّم للمراجعة
 let supplierItemsMap = new Map(); // supplier -> [names]
