@@ -2004,10 +2004,17 @@ function findProductDuplicateGroups(){
   const out = [...groups.values()].filter(g=> g.length > 1).map(g=> {
     const id = 'prod:' + g.map(x=> x.key).sort().join('||');
     const units = new Set(g.flatMap(x=> x.e.points.map(p=> normName(p.unit||'').toUpperCase())));
-    return { id, sameUnit: units.size <= 1, entries: g.map(x=> x.e).sort((a,b)=> b.points.length - a.points.length || (b.points[b.points.length-1].date||'').localeCompare(a.points[a.points.length-1].date||'')) };
+    // لو سعر الوحدة متقارب يبقى الفرق في كتابة الوحدة بس (كيلو/بدون وحدة، UNITS/PKTS) — آمن يتدمج تلقائي
+    const lastUP = g.map(x=> { const pts = x.e.points.filter(p=> p.unitPrice > 0); return pts.length ? pts[pts.length-1].unitPrice : 0; }).filter(v=> v > 0);
+    const priceClose = lastUP.length > 1 && Math.max(...lastUP) / Math.min(...lastUP) <= 1.12;
+    // الوحدة النهائية: الأكتر استخدامًا (ومش فاضية لو ينفع)
+    const uc = new Map(); g.forEach(x=> x.e.points.forEach(p=> { const u = normName(p.unit||''); uc.set(u, (uc.get(u)||0) + (u ? 1 : 0.5)); }));
+    const finalUnit = [...uc.entries()].sort((a,b)=> b[1]-a[1])[0][0];
+    return { id, sameUnit: units.size <= 1 || priceClose, packs: units.size > 1 && !priceClose, finalUnit, entries: g.map(x=> x.e).sort((a,b)=> b.points.length - a.points.length || (b.points[b.points.length-1].date||'').localeCompare(a.points[a.points.length-1].date||'')) };
   }).filter(g=> !(typeof dh !== 'undefined' && dh.dismissed.has(g.id)));
-  window.__dhProdGroups = out;
-  return out;
+  window.__dhProdGroups = out.filter(g=> !g.packs);
+  window.__dhProdPacks = out.filter(g=> g.packs);
+  return window.__dhProdGroups;
 }
 function findSupplierDuplicateGroups(counts){
   const names = [...counts.keys()].filter(n=> n !== UNNAMED_SUPPLIER_LABEL);
@@ -4570,10 +4577,11 @@ function dhRender(){
     ${sec('dupSup','مورد مكتوب بأكتر من اسم','فواتيره وأرصدته متقسمة على كذا اسم', c.dupSup.length, `
       ${c.dupSup.map(g=> `<div class="dh-row"><div class="dh-main">${g.map(n=> `<span dir="auto">${escapeHtml(n)}</span>`).join('<br>')}</div></div>`).join('')}
       ${act(`<button class="ap-btn primary" data-open="merge">افتح دمج الموردين</button>`)}`, 'err')}
-    ${c.dupProd.some(g=> g.sameUnit) ? '' : ''}${sec('dupProd','صنف مكتوب بأكتر من شكل','نفس الصنف ظاهر في أكتر من سطر في الأسعار (حرف أو رقم اتقرا غلط، أو وحدة مختلفة) — ادمجهم في اسم واحد', c.dupProd.length, (c.dupProd.filter(g=> g.sameUnit).length ? act(`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 8px;"><button class="ap-btn primary" data-mergeprodall="1">دمج الكل (${c.dupProd.filter(g=> g.sameUnit).length} صنف بنفس الوحدة)</button><span style="font-size:12px;color:var(--ink-soft);">بيوحّد كل مجموعة على الاسم اللي عليه سجلات أكتر. المجموعات اللي وحدتها مختلفة (عليها علامة ⚠) راجعها بنفسك بزرار "دمج / تعديل".</span></div>`) : '') + c.dupProd.slice(0,150).map(g=> `
-      <div class="dh-group">${g.sameUnit ? '' : '<div class="dh-why">⚠ وحدات مختلفة — راجع الكمية والوحدة قبل الدمج</div>'}${g.entries.map(e=> `<div dir="auto" style="font-size:13px;padding:2px 0;">${escapeHtml(e.displayName)} <small style="color:var(--ink-soft);">· ${escapeHtml(e.unit||'بدون وحدة')} · ${e.points.length} سجل · آخر سعر ${fmtPrice(e.points[e.points.length-1].unitPrice)}</small></div>`).join('')}
-        <div style="display:flex;gap:10px;margin-top:6px;">${act(`<button class="ap-btn primary" data-mergeprod="${escapeHtml(g.id)}">دمج / تعديل</button>`)}${act(`<button class="ap-link" data-dismiss="${escapeHtml(g.id)}">مش نفس الصنف</button>`)}</div>
+    ${c.dupProd.some(g=> g.sameUnit) ? '' : ''}${sec('dupProd','صنف مكتوب بأكتر من شكل','نفس الصنف ظاهر في أكتر من سطر في الأسعار (حرف أو رقم اتقرا غلط، أو وحدة مختلفة) — ادمجهم في اسم واحد', c.dupProd.length, act(`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 10px;"><button class="ap-btn primary" data-mergeprodall="1" style="font-size:14px;padding:10px 18px;">دمج الكل (${c.dupProd.length})</button><span style="font-size:12px;color:var(--ink-soft);">ضغطة واحدة: كل مجموعة بتتوحد على الاسم والوحدة الأكتر استخدامًا. السعر في كل المجموعات دي متقارب، فالدمج آمن.</span></div>`) + c.dupProd.slice(0,150).map(g=> `
+      <div class="dh-group">${g.entries.map(e=> `<div dir="auto" style="font-size:13px;padding:2px 0;">${escapeHtml(e.displayName)} <small style="color:var(--ink-soft);">· ${escapeHtml(e.unit||'بدون وحدة')} · ${e.points.length} سجل · آخر سعر ${fmtPrice(e.points[e.points.length-1].unitPrice)}</small></div>`).join('')}
+        <div style="display:flex;gap:10px;margin-top:4px;">${act(`<button class="ap-link" data-mergeprod="${escapeHtml(g.id)}">تعديل يدوي</button>`)}${act(`<button class="ap-link" data-dismiss="${escapeHtml(g.id)}">مش نفس الصنف</button>`)}</div>
       </div>`).join(''), 'err')}
+    ${(window.__dhProdPacks||[]).length ? `<div class="dh-sec done" style="opacity:1;"><div class="dh-body" style="border:none;background:none;font-size:12px;color:var(--ink-soft);line-height:1.8;">ℹ️ فيه ${window.__dhProdPacks.length} صنف بنفس الاسم بس بعبوات مختلفة وسعر مختلف (زي TIN و PAIL، أو كرتونة وحبة) — دول سايبهم منفصلين ومش محسوبين مشكلة. <a href="#" data-toggle="packs">${dh.open.has('packs') ? 'اخفيهم' : 'اعرضهم'}</a>${dh.open.has('packs') ? window.__dhProdPacks.map(g=> `<div style="margin-top:6px;">${g.entries.map(e=> `<span dir="auto">${escapeHtml(e.displayName)} (${escapeHtml(e.unit||'بدون وحدة')} · ${fmtPrice(e.points[e.points.length-1].unitPrice)})</span>`).join(' / ')} ${act(`<a href="#" data-mergeprod="${escapeHtml(g.id)}">دمج بمعامل تحويل</a>`)}</div>`).join('') : ''}</div></div>` : ''}
     ${sec('outliers','سعر وحدة غريب','سعر الوحدة بعيد جدًا عن العادي لنفس الصنف — غالبًا الكمية أو السعر اتقرا غلط', c.outliers.length, c.outliers.slice(0,100).map(o=> invRow(o.inv,
       `<span dir="auto">${escapeHtml(o.name)}</span>: ${apFmt(o.p.price)} ÷ ${o.p.qty} = <b>${fmtPrice(o.p.unitPrice)}</b> للوحدة، والعادي حوالي <b>${fmtPrice(o.med)}</b> (${o.ratio >= 1 ? 'أغلى ' + Math.round(o.ratio) + ' مرات' : 'أرخص ' + Math.round(1/o.ratio) + ' مرات'})`,
       act(`<button class="ap-link" data-dismiss="out:${escapeHtml(String(o.p.id))}">سليم</button>`))).join(''), 'err')}
@@ -4587,22 +4595,22 @@ function dhRender(){
 (function dhWire(){
   const root = document.getElementById('dhRoot');
   root.addEventListener('click', async (e)=>{
-    const t = e.target.closest('[data-toggle],[data-edit],[data-del],[data-dismiss],[data-open],[data-reset],[data-mergeprod],[data-mergeprodall]'); if(!t) return;
+    const t = e.target.closest('[data-toggle],[data-edit],[data-del],[data-dismiss],[data-open],[data-reset],[data-mergeprod],[data-mergeprodall]'); if(!t) return; if(t.tagName==='A') e.preventDefault();
     if(t.dataset.toggle){ const k = t.dataset.toggle; dh.open.has(k) ? dh.open.delete(k) : dh.open.add(k); return dhRender(); }
     if(t.dataset.edit) return openEditInvoice(t.dataset.edit);
     if(t.dataset.dismiss){ dh.dismissed.add(t.dataset.dismiss); dhSaveDismissed(); return dhRender(); }
     if(t.dataset.reset){ dh.dismissed.clear(); dhSaveDismissed(); return dhRender(); }
     if(t.dataset.open === 'merge') return openSupplierMergeModal();
     if(t.dataset.mergeprodall){
-      const groups = (window.__dhProdGroups||[]).filter(g=> g.sameUnit);
+      const groups = (window.__dhProdGroups||[]);
       if(!groups.length || !confirm(`دمج ${groups.length} صنف؟ كل مجموعة هتتوحد على الاسم اللي عليه سجلات أكتر.`)) return;
       t.disabled = true; t.textContent = 'جاري الدمج...';
       try{
         for(const g of groups){
           const final = g.entries[0].displayName;
-          const ids = g.entries.slice(1).flatMap(e=> e.points.map(p=> p.id)).filter(Boolean);
+          const ids = g.entries.flatMap(e=> e.points.filter(p=> p.name !== final || normName(p.unit||'') !== g.finalUnit).map(p=> p.id)).filter(Boolean);
           for(let i=0;i<ids.length;i+=100){
-            const { error } = await sb.from('invoice_items').update({ name: final }).in('id', ids.slice(i, i+100));
+            const { error } = await sb.from('invoice_items').update({ name: final, unit: g.finalUnit || null }).in('id', ids.slice(i, i+100));
             if(error) throw error;
           }
         }
@@ -4610,7 +4618,7 @@ function dhRender(){
       }catch(err){ console.error(err); alert('فشل الدمج: ' + (err.message || err)); dhRender(); }
       return;
     }
-    if(t.dataset.mergeprod){ const g = (window.__dhProdGroups||[]).find(x=> x.id === t.dataset.mergeprod); if(g) openMergeEditModal(g.entries); return; }
+    if(t.dataset.mergeprod){ const g = (window.__dhProdGroups||[]).concat(window.__dhProdPacks||[]).find(x=> x.id === t.dataset.mergeprod); if(g) openMergeEditModal(g.entries); return; }
     if(t.dataset.open === 'terms') return openSupplierDestModal();
     if(t.dataset.del){
       const inv = invoices.find(i=> String(i.id) === t.dataset.del); if(!inv) return;
