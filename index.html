@@ -3268,7 +3268,53 @@ els.exportBtn.addEventListener('click', ()=>{
     };
   }).sort((a,b)=> a['المنتج'].localeCompare(b['المنتج'],'ar'));
 
+  // ---- الأسعار شهر بشهر: سعر الوحدة (قبل الضريبة) لكل صنف في كل شهر ----
+  // المتوسط المرجّح بالكمية = إجمالي المبالغ ÷ إجمالي الكميات في الشهر
+  const r2 = (n)=> Math.round(n*100)/100;
+  const monthsSet = new Set();
+  const monthlyFor = (points)=>{
+    const m = new Map();
+    points.forEach(p=>{
+      if(!p.date || !(p.unitPrice > 0)) return;
+      const k = p.date.slice(0,7); monthsSet.add(k);
+      const o = m.get(k) || { amt:0, q:0 };
+      o.amt += p.price; o.q += p.price / p.unitPrice; m.set(k, o);
+    });
+    return m;
+  };
+  const prodMonthly = [...map.entries()].map(([key, entry])=> ({ key, entry, m: monthlyFor(entry.points) }));
+  const supMonthly = [];
+  map.forEach((entry, key)=>{
+    const bySup = new Map();
+    entry.points.forEach(p=>{ const s = p.store || 'بدون مورد'; if(!bySup.has(s)) bySup.set(s, []); bySup.get(s).push(p); });
+    bySup.forEach((pts, sup)=> supMonthly.push({ key, entry, sup, m: monthlyFor(pts) }));
+  });
+  const months = [...monthsSet].sort();
+  const monthCols = (m)=>{
+    const row = {}; const vals = [];
+    months.forEach(k=>{ const o = m.get(k); const v = o && o.q > 0 ? r2(o.amt / o.q) : ''; row[k] = v; if(v !== '') vals.push(v); });
+    row['أقل سعر'] = vals.length ? Math.min(...vals) : '';
+    row['أعلى سعر'] = vals.length ? Math.max(...vals) : '';
+    row['التغيير من أول شهر لآخر شهر %'] = vals.length > 1 && vals[0] > 0 ? r2((vals[vals.length-1] - vals[0]) / vals[0] * 100) : '';
+    return row;
+  };
+  const byMonthRows = prodMonthly.filter(x=> x.m.size).map(({key, entry, m})=> Object.assign({
+    'المنتج': entry.displayName, 'الوحدة': entry.unit || '', 'التصنيف': categoriesMap.get(key) || '', 'الجهة': effectiveDestination(key, entry) || ''
+  }, monthCols(m))).sort((a,b)=> a['المنتج'].localeCompare(b['المنتج'],'ar'));
+  const bySupRows = supMonthly.filter(x=> x.m.size).map(({entry, sup, m})=> Object.assign({
+    'المنتج': entry.displayName, 'المورد': sup, 'الوحدة': entry.unit || ''
+  }, monthCols(m))).sort((a,b)=> a['المنتج'].localeCompare(b['المنتج'],'ar') || a['المورد'].localeCompare(b['المورد']));
+  const fmtSheet = (rows, fixedCols)=>{
+    const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '': 'لا توجد بيانات' }]);
+    ws['!views'] = [{ RTL: true }];
+    ws['!cols'] = Object.keys(rows[0]||{a:1}).map((k,i)=> ({ wch: i===0 ? 44 : (i < fixedCols ? 18 : 11) }));
+    if(rows.length) ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{ r: rows.length, c: Object.keys(rows[0]).length - 1 } }) };
+    return ws;
+  };
+
   const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, fmtSheet(byMonthRows, 4), 'الأسعار شهر بشهر');
+  XLSX.utils.book_append_sheet(wb, fmtSheet(bySupRows, 3), 'الأسعار حسب المورد');
   const ws2 = XLSX.utils.json_to_sheet(summaryRows);
   const ws1 = XLSX.utils.json_to_sheet(detailRows);
   XLSX.utils.book_append_sheet(wb, ws2, 'ملخص المنتجات');
