@@ -525,6 +525,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
     </select>
     <button class="btn btn-ghost owner-only" id="mergeSuppliersBtn" style="font-size:12px;">دمج موردين متكررين</button>
     <button class="btn btn-ghost owner-only" id="supplierDestBtn" style="font-size:12px;">إعدادات الموردين</button>
+    <button class="btn btn-ghost owner-only" id="supplierItemsBtn" style="font-size:12px;">أصناف الموردين</button>
     <div style="display:flex;align-items:center;gap:6px;">
       <label for="currencyInput" style="font-size:12px;color:var(--ink-soft);">العملة</label>
       <input type="text" class="currency-input" id="currencyInput" maxlength="6" value="ج.م">
@@ -891,6 +892,26 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
 
 <datalist id="existingProducts"></datalist>
 
+<!-- ==== SUPPLIER ITEMS HTML START ==== -->
+<div class="overlay" id="siOverlay">
+  <div class="modal" style="max-width:760px;">
+    <button class="modal-close" id="siClose">×</button>
+    <h2>أصناف المورد</h2>
+    <p class="hint">اكتب الأصناف اللي المورد ده بيبيعها فعلًا. الاسم الغريب بيتقترح له الصنف اللي اسمه قريب، أو اللي <b>سعر الوحدة بتاعه نفس السعر</b>. أي اسم غريب اتسجل (زي "كبده" أو "مروحه" بدل "فروج كامل") بيظهر بالأحمر، وتختار يتحوّل لأنهي صنف. ومن بعدها، الفواتير الجديدة بتتصلّح لوحدها.</p>
+    <div class="ap-form-grid">
+      <div class="ap-f full"><label>المورد</label><select id="siSupplier"></select></div>
+      <div class="ap-f full"><label>الأصناف المعتمدة (كل صنف في سطر)</label><textarea id="siApproved" rows="5" dir="auto" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:4px;font-family:inherit;font-size:14px;background:var(--white);"></textarea></div>
+    </div>
+    <div class="ap-sec" style="margin-top:0;"><h4>الأسماء المسجلة للمورد ده</h4><span class="hint2">الأحمر مش في القايمة — اختار يتحوّل لإيه</span></div>
+    <div class="ap-scroll" id="siTable" style="max-height:340px;"></div>
+    <div class="ap-err" id="siErr"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="siSave" style="background:var(--pine-deep);color:var(--white);">حفظ</button>
+      <button class="btn btn-ghost" id="siCancel">إلغاء</button>
+    </div>
+  </div>
+</div>
+<!-- ==== SUPPLIER ITEMS HTML END ==== -->
 <!-- ==== INBOX HTML START ==== -->
 <div class="ix-screen" id="ixScreen">
   <div class="ix-top">
@@ -922,6 +943,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   </div>
   <div class="ix-toast" id="ixToast"></div>
   <datalist id="ixSuppliers"></datalist>
+  <datalist id="ixApprovedList"></datalist>
 </div>
 <!-- ==== INBOX HTML END ==== -->
 
@@ -1453,6 +1475,7 @@ async function refreshInvoicesFromServer(){
     }))
   }));
   if(typeof loadReceiptNumbers === 'function') await loadReceiptNumbers();
+  if(typeof siLoad === 'function') await siLoad();
 }
 
 async function insertInvoiceRemote(store, date, items, vatRate, invoiceNumber, paymentType){
@@ -3835,6 +3858,17 @@ function ixKnownItemsFor(store){
 }
 function ixMatchItems(v){
   if(!v.store) return;
+  const approved = (typeof supplierItemsMap !== 'undefined') ? supplierItemsMap.get(v.store) : null;
+  if(approved){
+    v.items.forEach(it=>{
+      if(it.nameLocked) return;
+      const raw = (it.origName || it.name || '').trim(); if(!raw) return;
+      const m = siBestMatch(raw, approved);
+      if(m){ if(m !== raw){ it.origName = raw; it.name = m; } else it.origName = ''; }
+      else { it.origName = ''; it.name = raw; }
+    });
+    return;
+  }
   const known = ixKnownItemsFor(v.store);
   if(!known.size) return;
   v.items.forEach(it=>{
@@ -4040,6 +4074,13 @@ function ixIssues(v){
   const valid = ixValidItems(v);
   if(!valid.length) errs.push(v.readError ? v.readError + ' — اكتب الأصناف من الصورة أو اضغط "اقرأ تاني"' : 'مفيش أصناف بسعر');
   else if(v.readError && /ما اتقراتش/.test(v.readError)) infos.push(v.readError);
+  const apr = (typeof supplierItemsMap !== 'undefined') ? supplierItemsMap.get(v.store) : null;
+  if(apr) v.items.forEach((it, idx)=>{
+    if(!(it.name||'').trim() || siIsApproved(v.store, it.name)) return;
+    const up = (ixNum(it.price)||0) / (ixNum(it.qty)||1);
+    const g = siPriceGuess(v.store, up, apr);
+    errs.push({ html: `الصنف "${escapeHtml(it.name)}" مش من أصناف المورد (${escapeHtml(apr.join('، '))}).` + (g ? ` غالبًا هو <b>${escapeHtml(g)}</b> (نفس سعر الوحدة ${fmtPrice(up)}) — <a href="#" data-act="setname" data-i="${idx}" data-name="${escapeHtml(g)}">حوّله لـ ${escapeHtml(g)}</a>` : ' صحّح الاسم من الصورة.') });
+  });
   ixLineProblems(v).forEach(lp=> errs.push({ html: `سطر "${escapeHtml(lp.it.name)}": الكمية ${ixFmt(lp.qty)} × سعر الوحدة ${ixFmt(lp.up)} = <b>${ixFmt(lp.expected)}</b> مش ${ixFmt(lp.price)}. <a href="#" data-act="fixline" data-i="${lp.i}">صحّح لـ ${ixFmt(lp.expected)}</a>` }));
   const dp = ixDateProblem(v.date);
   if(dp && dp.level === 'err') errs.push(dp.msg);
@@ -4152,6 +4193,7 @@ function ixCurInv(){ return ix.invs.find(v=> v.id === ix.cur) || null; }
 function ixRenderMain(){
   const m = ixEl('ixMain');
   const v = ixCurInv();
+  const dl = ixEl('ixApprovedList'); if(dl) dl.innerHTML = ((v && typeof supplierItemsMap !== 'undefined' && supplierItemsMap.get(v.store)) || []).map(a=> `<option value="${escapeHtml(a)}">`).join('');
   if(!v){
     const reading = ix.pages.some(p=> p.status === 'pending' || p.status === 'reading');
     m.innerHTML = `<div class="ix-empty">${reading ? 'جاري قراءة الفواتير…<br>أول ما يخلص ملف هتظهر فواتيره هنا وتقدر تبدأ تراجع' : 'اختار فاتورة من القايمة'}</div>`;
@@ -4180,7 +4222,7 @@ function ixRenderMain(){
     const price = ixNum(it.price), qty = ixNum(it.qty) || 1;
     const bad = ((it.name||'').trim() && price === null) || ixLineProblems(v).some(lp=> lp.i === i);
     return `<tr>
-      <td><input dir="auto" data-i="${i}" data-k="name" value="${escapeHtml(it.name||'')}" list="existingProducts" placeholder="اسم الصنف" ${ro} title="${escapeHtml(it.barcode ? 'باركود: '+it.barcode : '')}">${it.origName && !v.saved ? `<div class="ix-note" style="margin:2px 4px 0;font-size:11px;white-space:nowrap;" title="${escapeHtml('اتقرا: ' + it.origName)}">✓ اتطابق مع صنف موجود · <a href="#" data-act="undo-item" data-i="${i}">لأ، ده صنف جديد</a></div>` : ''}</td>
+      <td><input dir="auto" class="${(typeof supplierItemsMap !== 'undefined' && (it.name||'').trim() && !siIsApproved(v.store, it.name)) ? 'bad' : ''}" data-i="${i}" data-k="name" value="${escapeHtml(it.name||'')}" list="${(typeof supplierItemsMap !== 'undefined' && supplierItemsMap.has(v.store)) ? 'ixApprovedList' : 'existingProducts'}" placeholder="اسم الصنف" ${ro} title="${escapeHtml(it.barcode ? 'باركود: '+it.barcode : '')}">${it.origName && !v.saved ? `<div class="ix-note" style="margin:2px 4px 0;font-size:11px;white-space:nowrap;" title="${escapeHtml('اتقرا: ' + it.origName)}">✓ اتطابق مع صنف موجود · <a href="#" data-act="undo-item" data-i="${i}">لأ، ده صنف جديد</a></div>` : ''}</td>
       <td><input class="num" data-i="${i}" data-k="qty" value="${it.qty ?? ''}" ${ro}></td>
       <td><input dir="auto" data-i="${i}" data-k="unit" value="${escapeHtml(it.unit||'')}" placeholder="الوحدة" ${ro}></td>
       <td><input class="num ${bad?'bad':''}" data-i="${i}" data-k="price" value="${price===null?'':price}" placeholder="0.00" ${ro}></td>
@@ -4440,6 +4482,10 @@ ixMain.addEventListener('click', async (e)=>{
   const act = t.dataset.act;
   if(act === 'next') ixNext();
   else if(act === 'addrow'){ v.items.push(ixEmptyItem()); ixRenderMain(); const ins = ixMain.querySelectorAll('input[data-k="name"]'); if(ins.length) ins[ins.length-1].focus(); }
+  else if(act === 'setname'){
+    const it = v.items[Number(t.dataset.i)];
+    if(it){ it.origName = it.name; it.name = t.dataset.name; it.nameLocked = true; ixRenderMain(); ixRefreshComputed(); }
+  }
   else if(act === 'undo-item'){
     const it = v.items[Number(t.dataset.i)];
     if(it && it.origName){ it.name = it.origName; it.origName = ''; it.nameLocked = true; ixRenderMain(); ixRefreshComputed(); }
@@ -4468,7 +4514,7 @@ function apInvoiceTotal(inv){
 /* ==== SHARED MONEY HELPERS END ==== */
 /* ==== DATA HEALTH JS START ==== */
 // فحص البيانات: يطلّع كل المشاكل اللي بتبوّظ الأرقام، وكل مشكلة جنبها زرار تصليحها
-const dh = { dismissed: new Set(), open: new Set(['dupInv','dupSup','dupProd','dates','outliers']) };
+const dh = { dismissed: new Set(), open: new Set(['outside','dupInv','dupSup','dupProd','dates','outliers']) };
 try{ JSON.parse(localStorage.getItem('dhDismissed')||'[]').forEach(k=> dh.dismissed.add(k)); }catch(_){}
 function dhSaveDismissed(){ try{ localStorage.setItem('dhDismissed', JSON.stringify([...dh.dismissed])); }catch(_){} }
 function dhInvTotal(inv){ return apInvoiceTotal(inv); }
@@ -4501,6 +4547,7 @@ function dhChecks(){
   const counts = new Map(); invoices.forEach(inv=> { if(inv.store) counts.set(inv.store, (counts.get(inv.store)||0) + 1); });
   out.dupSup = findSupplierDuplicateGroups(counts);
   out.dupProd = findProductDuplicateGroups();
+  out.outside = (typeof siOutsideItems === 'function') ? siOutsideItems() : [];
 
   // 3) تواريخ مشكوك فيها
   out.dates = invoices.filter(inv=>{
@@ -4543,7 +4590,7 @@ function dhChecks(){
     .map(s=> ({ name: s, count: counts.get(s), why: supplierPaymentMap.get(s) ? 'آجل من غير مدة سداد' : 'نوع الدفع مش متحدد' }));
   return out;
 }
-function dhCount(c){ return c.dupInv.length + c.dupSup.length + c.dupProd.length + c.dates.length + c.outliers.length + c.noNumber.length + c.empty.length + c.noStore.length; }
+function dhCount(c){ return c.dupInv.length + c.dupSup.length + c.dupProd.length + c.outside.reduce((t,o)=> t + o.names.size, 0) + c.dates.length + c.outliers.length + c.noNumber.length + c.empty.length + c.noStore.length; }
 function dhUpdateBadge(){
   const b = document.getElementById('tabHealthBtn'); if(!b) return;
   const n = invoices.length ? dhCount(dhChecks()) : 0;
@@ -4577,7 +4624,10 @@ function dhRender(){
     ${sec('dupSup','مورد مكتوب بأكتر من اسم','فواتيره وأرصدته متقسمة على كذا اسم', c.dupSup.length, `
       ${c.dupSup.map(g=> `<div class="dh-row"><div class="dh-main">${g.map(n=> `<span dir="auto">${escapeHtml(n)}</span>`).join('<br>')}</div></div>`).join('')}
       ${act(`<button class="ap-btn primary" data-open="merge">افتح دمج الموردين</button>`)}`, 'err')}
-    ${c.dupProd.some(g=> g.sameUnit) ? '' : ''}${sec('dupProd','صنف مكتوب بأكتر من شكل','نفس الصنف ظاهر في أكتر من سطر في الأسعار (حرف أو رقم اتقرا غلط، أو وحدة مختلفة) — ادمجهم في اسم واحد', c.dupProd.length, act(`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 10px;"><button class="ap-btn primary" data-mergeprodall="1" style="font-size:14px;padding:10px 18px;">دمج الكل (${c.dupProd.length})</button><span style="font-size:12px;color:var(--ink-soft);">ضغطة واحدة: كل مجموعة بتتوحد على الاسم والوحدة الأكتر استخدامًا. السعر في كل المجموعات دي متقارب، فالدمج آمن.</span></div>`) + c.dupProd.slice(0,150).map(g=> `
+    ${sec('outside','أصناف غريبة عند المورد','أسماء مش في قايمة الأصناف المعتمدة للمورد (غالبًا اتقرت غلط من الخط اليدوي)', c.outside.reduce((t,o)=> t + o.names.size, 0), c.outside.map(o=> `
+      <div class="dh-row"><div class="dh-main"><b dir="auto">${escapeHtml(o.store)}</b><small dir="auto">${[...o.names.entries()].map(([n,k])=> `${escapeHtml(n)} (${k})`).join(' · ')}</small></div>
+      <div class="dh-acts">${act(`<button class="ap-btn primary" data-siopen="${escapeHtml(o.store)}">صحّحهم</button>`)}</div></div>`).join(''), 'err')}
+    ${sec('dupProd','صنف مكتوب بأكتر من شكل','نفس الصنف ظاهر في أكتر من سطر في الأسعار (حرف أو رقم اتقرا غلط، أو وحدة مختلفة) — ادمجهم في اسم واحد', c.dupProd.length, act(`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 10px;"><button class="ap-btn primary" data-mergeprodall="1" style="font-size:14px;padding:10px 18px;">دمج الكل (${c.dupProd.length})</button><span style="font-size:12px;color:var(--ink-soft);">ضغطة واحدة: كل مجموعة بتتوحد على الاسم والوحدة الأكتر استخدامًا. السعر في كل المجموعات دي متقارب، فالدمج آمن.</span></div>`) + c.dupProd.slice(0,150).map(g=> `
       <div class="dh-group">${g.entries.map(e=> `<div dir="auto" style="font-size:13px;padding:2px 0;">${escapeHtml(e.displayName)} <small style="color:var(--ink-soft);">· ${escapeHtml(e.unit||'بدون وحدة')} · ${e.points.length} سجل · آخر سعر ${fmtPrice(e.points[e.points.length-1].unitPrice)}</small></div>`).join('')}
         <div style="display:flex;gap:10px;margin-top:4px;">${act(`<button class="ap-link" data-mergeprod="${escapeHtml(g.id)}">تعديل يدوي</button>`)}${act(`<button class="ap-link" data-dismiss="${escapeHtml(g.id)}">مش نفس الصنف</button>`)}</div>
       </div>`).join(''), 'err')}
@@ -4595,12 +4645,13 @@ function dhRender(){
 (function dhWire(){
   const root = document.getElementById('dhRoot');
   root.addEventListener('click', async (e)=>{
-    const t = e.target.closest('[data-toggle],[data-edit],[data-del],[data-dismiss],[data-open],[data-reset],[data-mergeprod],[data-mergeprodall]'); if(!t) return; if(t.tagName==='A') e.preventDefault();
+    const t = e.target.closest('[data-toggle],[data-edit],[data-del],[data-dismiss],[data-open],[data-reset],[data-mergeprod],[data-mergeprodall],[data-siopen]'); if(!t) return; if(t.tagName==='A') e.preventDefault();
     if(t.dataset.toggle){ const k = t.dataset.toggle; dh.open.has(k) ? dh.open.delete(k) : dh.open.add(k); return dhRender(); }
     if(t.dataset.edit) return openEditInvoice(t.dataset.edit);
     if(t.dataset.dismiss){ dh.dismissed.add(t.dataset.dismiss); dhSaveDismissed(); return dhRender(); }
     if(t.dataset.reset){ dh.dismissed.clear(); dhSaveDismissed(); return dhRender(); }
     if(t.dataset.open === 'merge') return openSupplierMergeModal();
+    if(t.dataset.siopen) return siOpen(t.dataset.siopen);
     if(t.dataset.mergeprodall){
       const groups = (window.__dhProdGroups||[]);
       if(!groups.length || !confirm(`دمج ${groups.length} صنف؟ كل مجموعة هتتوحد على الاسم اللي عليه سجلات أكتر.`)) return;
@@ -4855,6 +4906,157 @@ document.getElementById('rcResult').addEventListener('click', async (e)=>{
   if(t.dataset.rckey){ const k = t.dataset.rckey; rc.open.has(k) ? rc.open.delete(k) : rc.open.add(k); rcRender(); }
 });
 /* ==== RECEIPTS JS END ==== */
+/* ==== SUPPLIER ITEMS JS START ==== */
+// قايمة الأصناف المعتمدة لكل مورد: أي صنف غريب بيتحوّل لأقرب صنف معتمد أو بيتعلّم للمراجعة
+let supplierItemsMap = new Map(); // supplier -> [names]
+let siMissing = false;
+async function siLoad(){
+  supplierItemsMap = new Map(); siMissing = false;
+  if(!currentWorkspace) return;
+  const { data, error } = await sb.from('supplier_items').select('supplier_name, items').eq('workspace_id', currentWorkspace.id);
+  if(error){ siMissing = /relation|does not exist|schema cache|Could not find/i.test(error.message||''); if(!siMissing) console.error(error); return; }
+  (data||[]).forEach(r=>{ const arr = Array.isArray(r.items) ? r.items.filter(Boolean) : []; if(arr.length) supplierItemsMap.set(r.supplier_name, arr); });
+}
+function arNorm(s){
+  return canonProductName(s).replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي')
+    .split(' ').map(w=> w.length > 3 ? w.replace(/^ال/,'') : w).join(' ').trim();
+}
+// أقرب صنف معتمد للاسم (أو null لو مفيش واحد قريب كفاية)
+function siBestMatch(name, approved){
+  const n = arNorm(name); if(!n) return null;
+  let best = null, bestScore = 0;
+  for(const a of approved){
+    const an = arNorm(a);
+    if(an === n) return a;
+    if(an.length >= 3 && (n.includes(an) || an.includes(n))){ const sc = 0.9; if(sc > bestScore){ best = a; bestScore = sc; } continue; }
+    const L = Math.max(an.length, n.length); const sc = 1 - levenshtein(an, n) / L;
+    if(sc > bestScore){ best = a; bestScore = sc; }
+  }
+  return bestScore >= 0.75 ? best : null;
+}
+// اقتراح بالسعر: الصنف المعتمد اللي آخر سعر وحدة ليه قريب جدًا (±3%) من سعر السطر ده
+function siPriceGuess(store, unitPrice, approved){
+  if(!(unitPrice > 0)) return null;
+  const last = new Map();
+  invoices.filter(i=> i.store === store).sort((a,b)=> (a.date||'').localeCompare(b.date||'')).forEach(inv=> (inv.items||[]).forEach(it=>{
+    const a = approved.find(x=> arNorm(x) === arNorm(it.name)); if(a) last.set(a, (Number(it.price)||0) / (Number(it.qty)||1));
+  }));
+  const hits = [...last.entries()].filter(([,up])=> up > 0 && Math.abs(up - unitPrice) / up <= 0.03);
+  return hits.length === 1 ? hits[0][0] : null;
+}
+function siIsApproved(store, name){
+  const list = supplierItemsMap.get(store); if(!list) return true;
+  const n = arNorm(name); return list.some(a=> arNorm(a) === n);
+}
+// للفحص: أصناف خارج القايمة
+function siOutsideItems(){
+  const out = [];
+  supplierItemsMap.forEach((list, store)=>{
+    const names = new Map();
+    invoices.forEach(inv=>{ if(inv.store !== store) return; (inv.items||[]).forEach(it=>{ if(!siIsApproved(store, it.name)){ const k = normName(it.name); names.set(k, (names.get(k)||0) + 1); } }); });
+    if(names.size) out.push({ store, names });
+  });
+  return out;
+}
+
+// ---------- نافذة "أصناف المورد" ----------
+let siState = null;
+function siOpen(store){
+  if(siMissing){ alert('محتاج خطوة واحدة: شغّل ملف supabase-schema-v22-supplier-items.sql في Supabase ← SQL Editor، وبعدين حدّث الصفحة.'); return; }
+  const sel = document.getElementById('siSupplier');
+  const sups = [...new Set(invoices.map(i=> i.store).filter(Boolean))].sort((a,b)=> a.localeCompare(b,'ar'));
+  sel.innerHTML = `<option value="">اختار المورد</option>` + sups.map(s=> `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  sel.value = store && sups.includes(store) ? store : '';
+  document.getElementById('siErr').textContent = '';
+  siLoadSupplier();
+  document.getElementById('siOverlay').classList.add('show');
+}
+function siLoadSupplier(){
+  const store = document.getElementById('siSupplier').value;
+  const stats = new Map(); // name -> {n, lastUP, unit, lastDate}
+  invoices.forEach(inv=>{ if(inv.store !== store) return; (inv.items||[]).forEach(it=>{
+    const k = normName(it.name); const o = stats.get(k) || { n:0, lastUP:0, unit:'', lastDate:'' };
+    o.n++; if((inv.date||'') >= o.lastDate){ o.lastDate = inv.date||''; o.lastUP = (Number(it.price)||0) / (Number(it.qty)||1); o.unit = it.unit||''; }
+    stats.set(k, o);
+  }); });
+  let approved = supplierItemsMap.get(store);
+  const isNew = !approved;
+  if(!approved) approved = [...stats.entries()].sort((a,b)=> b[1].n - a[1].n).filter(([,o])=> o.n >= 3).slice(0,12).map(([k])=> k);
+  siState = { store, stats, approved: approved.slice(), isNew, map: new Map() };
+  stats.forEach((o, name)=>{ siState.map.set(name, approved.some(a=> arNorm(a) === arNorm(name)) ? '' : (siBestMatch(name, approved) || '')); });
+  siRefill();
+  siRender();
+}
+function siPriceGuessLocal(up, approved){
+  if(!(up > 0) || !siState) return null;
+  // سعر كل صنف معتمد = سعر الأسماء المسجلة باسمه أو اللي اتحولتله
+  const priceOf = new Map();
+  siState.stats.forEach((o, n)=>{ const a = approved.find(x=> arNorm(x) === arNorm(n)) || siState.map.get(n); if(a && o.lastUP > 0) (priceOf.get(a) || priceOf.set(a, []).get(a)).push(o.lastUP); });
+  const hits = approved.filter(a=> (priceOf.get(a)||[]).some(p=> Math.abs(p - up) / p <= 0.03));
+  return hits.length === 1 ? hits[0] : null;
+}
+function siRefill(){
+  for(let pass=0; pass<2; pass++) siState.stats.forEach((o, name)=>{
+    if(siState.map.get(name) || siState.approved.some(a=> arNorm(a) === arNorm(name))) return;
+    const g = siPriceGuessLocal(o.lastUP, siState.approved); if(g) siState.map.set(name, g);
+  });
+}
+function siRender(){
+  const st = siState;
+  document.getElementById('siApproved').value = st.store ? st.approved.join('\n') : '';
+  const box = document.getElementById('siTable');
+  if(!st.store){ box.innerHTML = `<div class="ap-empty">اختار المورد الأول</div>`; return; }
+  const approvedSet = new Set(st.approved.map(arNorm));
+  const rows = [...st.stats.entries()].sort((a,b)=> (approvedSet.has(arNorm(a[0])) - approvedSet.has(arNorm(b[0]))) || b[1].n - a[1].n);
+  const opts = (sel)=> `<option value="">— سيبه زي ما هو —</option>` + st.approved.map(a=> `<option value="${escapeHtml(a)}" ${sel===a?'selected':''}>${escapeHtml(a)}</option>`).join('');
+  box.innerHTML = `<table class="ap-table" style="min-width:0;"><thead><tr><th>الاسم المسجل</th><th class="n">سجلات</th><th class="n">آخر سعر وحدة</th><th>يتحوّل إلى</th></tr></thead><tbody>
+    ${rows.map(([name, o])=>{ const ok = approvedSet.has(arNorm(name)); return `<tr>
+      <td dir="auto" style="${ok ? '' : 'color:var(--brick);font-weight:600;'}">${escapeHtml(name)}${ok ? ' ✓' : ''}</td>
+      <td class="n">${o.n}</td><td class="n">${fmtPrice(o.lastUP)} ${escapeHtml(o.unit)}</td>
+      <td>${ok ? '<span style="color:var(--ink-soft);font-size:12px;">معتمد</span>' : `<select data-simap="${escapeHtml(name)}" style="padding:5px;border:1px solid var(--line);border-radius:3px;font-family:inherit;">${opts(st.map.get(name))}</select>`}</td>
+    </tr>`; }).join('')}
+  </tbody></table>`;
+}
+async function siSave(){
+  const st = siState; const err = document.getElementById('siErr'); err.textContent = '';
+  if(!st || !st.store) return err.textContent = 'اختار المورد.';
+  const approved = [...new Set(document.getElementById('siApproved').value.split(/\n|،|,/).map(x=> normName(x)).filter(Boolean))];
+  if(!approved.length) return err.textContent = 'اكتب صنف واحد على الأقل في قايمة الأصناف المعتمدة.';
+  const btn = document.getElementById('siSave'); btn.disabled = true; btn.textContent = 'جاري الحفظ...';
+  try{
+    const { error } = await sb.from('supplier_items').upsert({ workspace_id: currentWorkspace.id, supplier_name: st.store, items: approved, updated_at: new Date().toISOString() });
+    if(error) throw error;
+    supplierItemsMap.set(st.store, approved);
+    // تحويل الأسماء
+    let changed = 0;
+    for(const [from, to] of st.map.entries()){
+      if(!to || !approved.includes(to)) continue;
+      const ids = invoices.filter(i=> i.store === st.store).flatMap(i=> (i.items||[]).filter(it=> normName(it.name) === from).map(it=> it.id)).filter(Boolean);
+      for(let i=0;i<ids.length;i+=100){ const r = await sb.from('invoice_items').update({ name: to }).in('id', ids.slice(i, i+100)); if(r.error) throw r.error; }
+      changed += ids.length;
+    }
+    document.getElementById('siOverlay').classList.remove('show');
+    await refreshInvoicesFromServer(); renderAll();
+    if(typeof dhRender === 'function' && els.healthView && els.healthView.style.display === 'block') dhRender();
+    if(changed) setTimeout(()=> alert(`✓ اتحفظت قايمة أصناف ${st.store}، واتعدّل اسم ${changed} سطر.`), 50);
+  }catch(e){ console.error(e); err.textContent = 'فشل الحفظ: ' + (e.message || e); }
+  finally{ btn.disabled = false; btn.textContent = 'حفظ'; }
+}
+document.getElementById('siSupplier').addEventListener('change', siLoadSupplier);
+document.getElementById('siApproved').addEventListener('change', (e)=>{
+  if(!siState || !siState.store) return;
+  siState.approved = [...new Set(e.target.value.split(/\n|،|,/).map(x=> normName(x)).filter(Boolean))];
+  siState.map.forEach((v, k)=>{ if(v && !siState.approved.includes(v)) siState.map.set(k, ''); });
+  siState.stats.forEach((o, name)=>{ if(!siState.map.get(name)) siState.map.set(name, siState.approved.some(a=> arNorm(a) === arNorm(name)) ? '' : (siBestMatch(name, siState.approved) || '')); });
+  siRefill();
+  siRender();
+});
+document.getElementById('siTable').addEventListener('change', (e)=>{ const n = e.target.dataset.simap; if(n !== undefined){ siState.map.set(n, e.target.value); siRefill(); siRender(); } });
+document.getElementById('siSave').addEventListener('click', siSave);
+['siClose','siCancel'].forEach(id=> document.getElementById(id).addEventListener('click', ()=> document.getElementById('siOverlay').classList.remove('show')));
+document.getElementById('supplierItemsBtn').addEventListener('click', ()=> siOpen(els.supplierFilter.value || ''));
+/* ==== SUPPLIER ITEMS JS END ==== */
+
 
 
 
