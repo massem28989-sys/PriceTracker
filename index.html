@@ -2647,7 +2647,23 @@ function compareStatementToRecords(allStatementItems, supplierName, fromDate, to
     if(!ourMatch) status = 'missing_in_app';
     else if(Math.abs(diff) < 0.5) status = 'match';
     else status = 'mismatch';
-    return { invoiceNumber: stmt.invoiceNumber, date: stmt.date, total: stmt.total, ourTotal: ourMatch ? ourMatch.total : null, diff, status, matchedBy };
+    // فاتورة عندنا من غير رقم والمبلغ مطابق ⇒ ناخد رقمها من الكشف
+    const fillId = (ourMatch && !ourMatch.invoiceNumber && stmt.invoiceNumber && Math.abs(diff) <= 1) ? ourMatch.id : null;
+    return { invoiceNumber: stmt.invoiceNumber, date: stmt.date, total: stmt.total, ourTotal: ourMatch ? ourMatch.total : null, diff, status, matchedBy, fillId };
+  });
+  // تاني محاولة: فواتير عندنا من غير رقم — نطابقها بالمبلغ (±1) والتاريخ (±3 أيام) لو فيه احتمال واحد بس
+  // فواتير أول/آخر الفترة ممكن تكون قبلها أو بعدها بيومين
+  const widePool = computeSettlementRows(supplierName, fromDate ? addDaysToDate(fromDate, -3) : '', toDate ? addDaysToDate(toDate, 3) : '');
+  const dayDiff = (a, b)=> (a && b) ? Math.abs((new Date(a) - new Date(b)) / 86400000) : 99;
+  results.forEach(r=>{
+    if(r.status !== 'missing_in_app' || !r.invoiceNumber) return;
+    const cands = widePool.filter(o=> !matchedOurIds.has(o.id) && !o.invoiceNumber && Math.abs(o.total - r.total) <= 1 && dayDiff(o.date, r.date) <= 3);
+    if(cands.length !== 1) return;
+    // ولازم مايكونش فيه سطر تاني في الكشف بنفس المبلغ والتاريخ ينافسه
+    const rivals = results.filter(x=> x !== r && x.status === 'missing_in_app' && Math.abs(x.total - r.total) <= 1 && dayDiff(x.date, cands[0].date) <= 3);
+    if(rivals.length) return;
+    const o = cands[0]; matchedOurIds.add(o.id);
+    r.ourTotal = o.total; r.diff = o.total - r.total; r.status = Math.abs(r.diff) < 0.5 ? 'match' : 'mismatch'; r.matchedBy = 'amount'; r.fillId = o.id;
   });
 
   // فواتير الكشف اللي مش عندنا: يمكن متسجلة باسم مورد تاني
@@ -2683,7 +2699,7 @@ function renderStatementComparison(rows){
     other_supplier: '<span style="color:#8a6312;font-weight:600;">↔ متسجلة عندك باسم مورد تاني</span>',
     non_invoice: '<span style="color:var(--ink-soft);">مرتجع أو دفعة في كشف المورد (مش فاتورة)</span>'
   };
-  const matchByNote = { date: ' <span style="font-size:10px;color:var(--ink-soft);">(بالتاريخ، راجعها)</span>', number: '', '': '' };
+  const matchByNote = { date: ' <span style="font-size:10px;color:var(--ink-soft);">(بالتاريخ، راجعها)</span>', amount: ' <span style="font-size:10px;color:var(--ink-soft);">(بالمبلغ والتاريخ)</span>', number: '', '': '' };
   els.statementCompareResult.innerHTML = `
     <table class="items">
       <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>إجمالي الكشف</th><th>إجمالي عندنا</th><th>الفرق</th><th>الحالة</th></tr></thead>
@@ -2746,6 +2762,20 @@ els.statementFileInput.addEventListener('change', async ()=>{
       periodNote = ` · المقارنة على فترة الكشف من ${from} إلى ${to}`;
     }
     const compared = compareStatementToRecords(items, supplier, from, to);
+    // تسجيل أرقام الفواتير اللي كانت من غير رقم (من الكشف)
+    let filledNote = '';
+    const fills = compared.filter(r=> r.fillId && r.invoiceNumber);
+    if(fills.length){
+      let ok = 0;
+      for(const r of fills){
+        const { error } = await sb.from('invoices').update({ invoice_number: r.invoiceNumber }).eq('id', r.fillId);
+        if(error){ console.error(error); continue; }
+        const inv = invoices.find(i=> i.id === r.fillId); if(inv) inv.invoiceNumber = r.invoiceNumber;
+        ok++;
+      }
+      if(ok){ try{ renderSettlement(); }catch(_){} }
+      if(ok) filledNote = `✓ اتسجل رقم <b>${ok}</b> فاتورة كانت عندك من غير رقم (اتاخد من الكشف لأن المبلغ والتاريخ مطابقين).`;
+    }
     renderStatementComparison(compared);
     const issues = compared.filter(r=> r.status !== 'match' && r.status !== 'non_invoice').length;
     const cnt = (st)=> compared.filter(r=> r.status === st);
@@ -2753,6 +2783,7 @@ els.statementFileInput.addEventListener('change', async ()=>{
     const others = cnt('other_supplier'), dups = cnt('duplicate_in_app'), missApp = cnt('missing_in_app'), diffs = cnt('mismatch'), missStmt = cnt('missing_in_statement');
     const sumOf = (arr, k)=> arr.reduce((t,r)=> t + (r[k]||0), 0);
     const tips = [];
+    if(filledNote) tips.push(filledNote);
     if(others.length){ const names = [...new Set(others.map(r=> r.otherStore))]; tips.push(`↔ <b>${others.length}</b> فاتورة متسجلة عندك باسم مورد تاني (${names.map(n=> escapeHtml(n)).join('، ')}) — ادمج الاسمين من "دمج موردين متكررين" عشان تتحسب صح.`); }
     if(dups.length) tips.push(`⚠ <b>${dups.length}</b> فاتورة متسجلة عندك مرتين بإجمالي زيادة <b class="mono">${apFmt(sumOf(dups,'ourTotal'))}</b> — امسح النسخة الزيادة من سجل الفواتير.`);
     if(missApp.length) tips.push(`✗ <b>${missApp.length}</b> فاتورة في كشف المورد مش متسجلة عندك خالص بإجمالي <b class="mono">${apFmt(sumOf(missApp,'total'))}</b> — اطلب صورها من المورد أو دوّر عليها وسجّلها.`);
@@ -4703,7 +4734,7 @@ function dhRender(){
     ${sec('dates','تواريخ مشكوك فيها','تاريخ ناقص أو في المستقبل أو أقدم من سنة — غالبًا اتقرا غلط', c.dates.length, c.dates.map(d=> invRow(d.inv, escapeHtml(d.why), act(`<button class="ap-link" data-dismiss="date:${escapeHtml(String(d.inv.id))}">التاريخ صح</button>`))).join(''), 'err')}
     ${sec('empty','فواتير فاضية أو إجماليها صفر','', c.empty.length, c.empty.map(inv=> invRow(inv, '', act(`<button class="ap-btn danger" data-del="${escapeHtml(String(inv.id))}">امسحها</button>`))).join(''), 'err')}
     ${sec('noStore','فواتير من غير مورد','', c.noStore.length, c.noStore.map(inv=> invRow(inv)).join(''), 'err')}
-    ${sec('noNumber','فواتير من غير رقم','البرنامج مش هيقدر يمنع تكرارها أو يطابقها مع كشف الحساب', c.noNumber.length, c.noNumber.map(inv=> invRow(inv, '', act(`<button class="ap-link" data-dismiss="nonum:${escapeHtml(String(inv.id))}">مالهاش رقم فعلًا</button>`))).join(''), 'warn')}
+    ${sec('noNumber','فواتير من غير رقم','البرنامج مش هيقدر يمنع تكرارها أو يطابقها مع كشف الحساب', c.noNumber.length, (c.noNumber.length ? `<div style="font-size:13px;line-height:1.9;margin:4px 0 10px;background:var(--paper-raised);border:1px solid var(--line);border-radius:5px;padding:8px 12px;">مش محتاج تراجعهم واحدة واحدة: ارفع <b>كشف حساب</b> كل مورد من تبويب "كشف حساب الموردين"، والبرنامج هيملا الأرقام لوحده من الكشف لأي فاتورة مبلغها وتاريخها مطابقين.<br>${[...c.noNumber.reduce((m,inv)=> m.set(inv.store||'—', (m.get(inv.store||'—')||0)+1), new Map()).entries()].sort((a,b)=> b[1]-a[1]).map(([st,n])=> `<span style="display:inline-block;margin-inline-end:14px;" dir="auto">${escapeHtml(st)}: <b>${n}</b></span>`).join('')}</div>` : '') + c.noNumber.map(inv=> invRow(inv, '', act(`<button class="ap-link" data-dismiss="nonum:${escapeHtml(String(inv.id))}">مالهاش رقم فعلًا</button>`))).join(''), 'warn')}
     ${dh.dismissed.size ? `<div style="margin-top:10px;"><button class="ap-link" data-reset="1">رجّع كل اللي اتعلّم عليه "سليم" (${dh.dismissed.size})</button></div>` : ''}`;
   dhUpdateBadge();
 }
