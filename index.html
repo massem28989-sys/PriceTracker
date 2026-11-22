@@ -3298,8 +3298,10 @@ els.exportBtn.addEventListener('click', ()=>{
     row['التغيير من أول شهر لآخر شهر %'] = vals.length > 1 && vals[0] > 0 ? r2((vals[vals.length-1] - vals[0]) / vals[0] * 100) : '';
     return row;
   };
+  // الموردين للصنف: الأحدث شراءً أولًا
+  const suppliersOf = (entry)=>{ const last = new Map(); entry.points.forEach(p=>{ const k = p.store || 'بدون مورد'; if(!last.has(k) || (p.date||'') > last.get(k)) last.set(k, p.date||''); }); return [...last.entries()].sort((a,b)=> b[1].localeCompare(a[1])).map(x=> x[0]).join('، '); };
   const byMonthRows = prodMonthly.filter(x=> x.m.size).map(({key, entry, m})=> Object.assign({
-    'المنتج': entry.displayName, 'الوحدة': entry.unit || '', 'التصنيف': categoriesMap.get(key) || '', 'الجهة': effectiveDestination(key, entry) || ''
+    'المنتج': entry.displayName, 'المورد': suppliersOf(entry), 'الوحدة': entry.unit || '', 'التصنيف': categoriesMap.get(key) || '', 'الجهة': effectiveDestination(key, entry) || ''
   }, monthCols(m))).sort((a,b)=> a['المنتج'].localeCompare(b['المنتج'],'ar'));
   const bySupRows = supMonthly.filter(x=> x.m.size).map(({entry, sup, m})=> Object.assign({
     'المنتج': entry.displayName, 'المورد': sup, 'الوحدة': entry.unit || ''
@@ -3307,13 +3309,13 @@ els.exportBtn.addEventListener('click', ()=>{
   const fmtSheet = (rows, fixedCols)=>{
     const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '': 'لا توجد بيانات' }]);
     ws['!views'] = [{ RTL: true }];
-    ws['!cols'] = Object.keys(rows[0]||{a:1}).map((k,i)=> ({ wch: i===0 ? 44 : (i < fixedCols ? 18 : 11) }));
+    ws['!cols'] = Object.keys(rows[0]||{a:1}).map((k,i)=> ({ wch: i===0 ? 44 : (k==='المورد' ? 40 : (i < fixedCols ? 18 : 11)) }));
     if(rows.length) ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{ r: rows.length, c: Object.keys(rows[0]).length - 1 } }) };
     return ws;
   };
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, fmtSheet(byMonthRows, 4), 'الأسعار شهر بشهر');
+  XLSX.utils.book_append_sheet(wb, fmtSheet(byMonthRows, 5), 'الأسعار شهر بشهر');
   XLSX.utils.book_append_sheet(wb, fmtSheet(bySupRows, 3), 'الأسعار حسب المورد');
   const ws2 = XLSX.utils.json_to_sheet(summaryRows);
   const ws1 = XLSX.utils.json_to_sheet(detailRows);
