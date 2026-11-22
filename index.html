@@ -783,15 +783,16 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
   <div class="modal" style="max-width:720px;">
     <button class="modal-close" id="closeMergeEditBtn">×</button>
     <h2>مراجعة وتعديل قبل الدمج</h2>
-    <p class="hint">راجع كل سجل سعر تحت. عدّل السعر أو الكمية أو الوحدة لو فيه غلط قبل ما تأكّد — سعر الوحدة بيتحدّث قدامك أول بأول. الاسم النهائي هيتطبق على كل الصفوف.</p>
-    <div class="field" style="margin-bottom:14px;">
+    <p class="hint">راجع كل سجل سعر تحت. عدّل السعر أو الكمية أو الوحدة لو فيه غلط قبل ما تأكّد — سعر الوحدة بيتحدّث قدامك أول بأول. ولو صف معيّن صنف مختلف (عبوة تانية مثلًا) غيّر اسمه في عمود "الاسم".</p>
+    <div class="field" style="margin-bottom:10px;">
       <label>الاسم النهائي لكل الصفوف</label>
       <input type="text" id="mergeFinalName">
     </div>
-    <table class="items">
-      <thead><tr><th style="width:16%;">التاريخ</th><th style="width:22%;">المورد</th><th style="width:16%;">السعر</th><th style="width:14%;">الكمية</th><th style="width:16%;">الوحدة</th><th style="width:16%;">سعر الوحدة</th></tr></thead>
+    <div id="mergeClusters"></div>
+    <div style="overflow-x:auto;"><table class="items">
+      <thead><tr><th style="width:24%;">الاسم</th><th style="width:12%;">التاريخ</th><th style="width:16%;">المورد</th><th style="width:13%;">السعر</th><th style="width:10%;">الكمية</th><th style="width:11%;">الوحدة</th><th style="width:14%;">سعر الوحدة</th></tr></thead>
       <tbody id="mergeEditBody"></tbody>
-    </table>
+    </table></div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="confirmMergeEditBtn">تأكيد</button>
       <button class="btn btn-ghost" id="cancelMergeEditBtn">إلغاء</button>
@@ -1894,8 +1895,10 @@ function openMergeEditModal(entries){
     id: p.id, date: p.date, store: p.store, price: p.price, qty: p.qty, unit: p.unit
   }))).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
 
+  const suggested0 = entries.slice().sort((a,b)=> b.points.length - a.points.length)[0].displayName;
   els.mergeEditBody.innerHTML = rows.map(p => `
     <tr data-id="${escapeHtml(String(p.id||''))}">
+      <td><input type="text" class="mergeNameInput" dir="auto" value="${escapeHtml(suggested0)}" style="font-size:12px;"></td>
       <td style="font-size:12px;color:var(--ink-soft);">${escapeHtml(p.date||'—')}</td>
       <td style="font-size:12px;color:var(--ink-soft);">${escapeHtml(p.store||'—')}</td>
       <td><input type="text" class="mergePriceInput num" value="${p.price!==undefined&&p.price!==null?p.price:''}"></td>
@@ -1906,6 +1909,8 @@ function openMergeEditModal(entries){
 
   const suggested = entries.slice().sort((a,b)=> b.points.length - a.points.length)[0].displayName;
   els.mergeFinalName.value = suggested;
+  els.mergeFinalName.dataset.prev = suggested;
+  renderMergeClusters();
   els.mergeEditStatus.innerHTML = '';
   els.mergeEditOverlay.classList.add('show');
 }
@@ -1916,23 +1921,53 @@ els.mergeEditBody.addEventListener('input', (e)=>{
   const price = parseFloat(tr.querySelector('.mergePriceInput').value) || 0;
   const qty = parseFloat(tr.querySelector('.mergeQtyInput').value) || 1;
   tr.querySelector('.mergeUnitPriceOut').textContent = fmtPrice(price/qty);
+  if(!e.target.classList.contains('mergeNameInput')) renderMergeClusters();
 });
 
+// لو الصفوف فيها أكتر من مستوى سعر (زي طحينة 9 كيلو بـ 205 و18 كيلو بـ 405) اعرض اختصار لتسمية كل مستوى لوحده
+function renderMergeClusters(){
+  const box = document.getElementById('mergeClusters');
+  const trs = [...els.mergeEditBody.querySelectorAll('tr')];
+  const up = (tr)=> (parseFloat(tr.querySelector('.mergePriceInput').value)||0) / (parseFloat(tr.querySelector('.mergeQtyInput').value)||1);
+  const clusters = [];
+  trs.forEach(tr=>{ const u = up(tr); if(!(u > 0)) return; const c = clusters.find(c=> Math.abs(c.u - u) / c.u <= 0.12); if(c) c.rows.push(tr); else clusters.push({ u, rows:[tr] }); });
+  if(clusters.length < 2){ box.innerHTML = ''; return; }
+  clusters.sort((a,b)=> a.u - b.u);
+  box.innerHTML = `<div style="background:#F7EBCB;color:#6B4B0C;border-radius:5px;padding:10px 12px;margin-bottom:12px;font-size:13px;">
+    <b>الصفوف فيها ${clusters.length} مستويات سعر مختلفة</b> — غالبًا عبوات مختلفة. سمّي كل مستوى لوحده:
+    ${clusters.map((c,i)=> `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      <span style="min-width:150px;">سعر الوحدة حوالي <b class="mono">${fmtPrice(Math.round(c.u*100)/100)}</b> (${c.rows.length} صف)</span>
+      <input type="text" class="mergeClusterName" data-c="${i}" dir="auto" value="${escapeHtml(c.rows[0].querySelector('.mergeNameInput').value)}" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid var(--line);border-radius:3px;font-family:inherit;">
+    </div>`).join('')}
+  </div>`;
+  box._clusters = clusters;
+}
+document.getElementById('mergeClusters').addEventListener('input', (e)=>{
+  const i = e.target.dataset.c; if(i === undefined) return;
+  const c = e.currentTarget._clusters[Number(i)]; c.rows.forEach(tr=> tr.querySelector('.mergeNameInput').value = e.target.value);
+});
+els.mergeFinalName.addEventListener('input', ()=>{
+  const prev = els.mergeFinalName.dataset.prev || '', v = els.mergeFinalName.value;
+  els.mergeEditBody.querySelectorAll('.mergeNameInput').forEach(inp=>{ if(inp.value === prev) inp.value = v; });
+  document.querySelectorAll('#mergeClusters .mergeClusterName').forEach(inp=>{ if(inp.value === prev) inp.value = v; });
+  els.mergeFinalName.dataset.prev = v;
+});
 function closeMergeEditModal(){ els.mergeEditOverlay.classList.remove('show'); }
 els.closeMergeEditBtn.addEventListener('click', closeMergeEditModal);
 els.cancelMergeEditBtn.addEventListener('click', closeMergeEditModal);
 els.mergeEditOverlay.addEventListener('click', (e)=>{ if(e.target===els.mergeEditOverlay) closeMergeEditModal(); });
 
 els.confirmMergeEditBtn.addEventListener('click', async ()=>{
-  const name = els.mergeFinalName.value.trim();
-  if(!name){ els.mergeEditStatus.innerHTML = `<div class="error-box">اكتب الاسم النهائي.</div>`; return; }
+  const finalName = els.mergeFinalName.value.trim();
   const rows = [...els.mergeEditBody.querySelectorAll('tr')];
   const updates = rows.map(tr => ({
     id: tr.dataset.id,
+    name: (tr.querySelector('.mergeNameInput').value.trim() || finalName),
     price: parseFloat(tr.querySelector('.mergePriceInput').value),
     qty: parseFloat(tr.querySelector('.mergeQtyInput').value) || 1,
     unit: tr.querySelector('.mergeUnitInput').value.trim() || null
   })).filter(u => u.id && !isNaN(u.price));
+  if(updates.some(u=> !u.name)){ els.mergeEditStatus.innerHTML = `<div class="error-box">اكتب اسم لكل صف.</div>`; return; }
 
   if(updates.length === 0){
     const noIds = rows.some(tr => !tr.dataset.id);
@@ -1944,7 +1979,7 @@ els.confirmMergeEditBtn.addEventListener('click', async ()=>{
   els.mergeEditStatus.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري الحفظ...</div>`;
   try{
     await Promise.all(updates.map(u =>
-      sb.from('invoice_items').update({ name, barcode: null, price: u.price, qty: u.qty, unit: u.unit }).eq('id', u.id)
+      sb.from('invoice_items').update({ name: u.name, barcode: null, price: u.price, qty: u.qty, unit: u.unit }).eq('id', u.id)
     ));
     selectedProductKeys.clear();
     closeMergeEditModal();
