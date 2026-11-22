@@ -4159,6 +4159,21 @@ function ixDupInDb(v){
   const n = normalizeInvoiceNumber(v.invoiceNumber);
   return invoices.find(i=> i.store === v.store && i.invoiceNumber && normalizeInvoiceNumber(i.invoiceNumber) === n) || null;
 }
+// فاتورة اتسجلت قبل كده من غير رقم (نفس المورد + نفس المبلغ ±1 + تاريخ ±3 أيام) ⇒ نسجّل رقمها بس بدل ما تتكرر
+function ixUnnumberedRaw(o){
+  if(!o.invoiceNumber || !o.store || o.isCredit) return null;
+  const sub = ixValidItems(o).reduce((t,it)=> t + (ixNum(it.price)||0), 0); if(!(sub > 0)) return null;
+  const dd = (a,b)=> (a && b) ? Math.abs((new Date(a) - new Date(b)) / 86400000) : 99;
+  const c = invoices.filter(i=> i.store === o.store && !i.invoiceNumber && dd(i.date, o.date) <= 3 &&
+    Math.abs((i.items||[]).reduce((t,it)=> t + (Number(it.price)||0), 0) - sub) <= 1);
+  return c.length === 1 ? c[0] : null;
+}
+function ixUnnumberedMatch(v){
+  const m = ixUnnumberedRaw(v); if(!m) return null;
+  // لو فاتورة قبلها في نفس الدفعة بتشاور على نفس السجل، دي تتحفظ عادي
+  if(ix.invs.some(o=> o !== v && !o.skipped && ix.invs.indexOf(o) < ix.invs.indexOf(v) && ixUnnumberedRaw(o) === m)) return null;
+  return m;
+}
 function ixDupInBatch(v){
   if(!v.invoiceNumber || !v.store) return null;
   const n = normalizeInvoiceNumber(v.invoiceNumber);
@@ -4186,6 +4201,8 @@ function ixIssues(v){
   const c = ixCheck(v);
   if(valid.length && c.state === 'err') errs.push(`مجموع الأصناف ${ixFmt(c.mine)} مش مساوي الإجمالي المطبوع ${ixFmt(c.target)} (${c.label}) — الفرق ${ixFmt(Math.abs(c.diff))}. قارن الأسطر بالصورة.`);
   const dupDb = ixDupInDb(v);
+  const unm = dupDb ? null : ixUnnumberedMatch(v);
+  if(unm) infos.unshift(`الفاتورة دي متسجلة عندك قبل كده من غير رقم (بتاريخ ${unm.date || '—'} وبنفس المبلغ). لما تحفظ، البرنامج هيسجّل رقمها ${v.invoiceNumber} على السجل القديم بس، ومش هيكررها.`);
   if(dupDb) errs.push(`${v.isCredit ? 'المرتجع' : 'الفاتورة'} رقم ${v.invoiceNumber} من ${v.store} ${v.isCredit ? 'متسجل' : 'متسجلة'} قبل كده بتاريخ ${dupDb.date || '—'}`);
   if(v.isCredit) infos.unshift('ده <b>مرتجع / إشعار دائن</b> مش فاتورة شراء، فالبرنامج اتجاهله ومش هيحفظه (المرتجعات بتتسجل على الـ ERP). لو هو فاتورة شراء فعلًا غيّر "نوع المستند" ورجّعها.');
   const dupB = ixDupInBatch(v);
@@ -4505,10 +4522,19 @@ async function ixSaveAll(){
   const list = ix.invs.filter(ixSavable);
   if(!list.length) return;
   ix.saving = true; ixRenderTop();
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, numbered = 0;
   for(const v of list){
     const items = ixValidItems(v).map(it=>({ name: it.name.trim(), barcode: (it.barcode||'').trim(), price: ixNum(it.price), qty: ixNum(it.qty) || 1, unit: (it.unit||'').trim(), destination: (it.destination||'').trim() }));
     try{
+      const unm = ixUnnumberedMatch(v);
+      if(unm){
+        const { error } = await sb.from('invoices').update({ invoice_number: (v.invoiceNumber||'').trim() }).eq('id', unm.id);
+        if(error) throw error;
+        unm.invoiceNumber = (v.invoiceNumber||'').trim();
+        if((v.receiptNumber||'').trim()) await saveReceiptNumber(unm.id, v.receiptNumber);
+        v.saved = true; v.saveError = ''; ok++; numbered++;
+        ixRenderSide(); ixRenderTop(); continue;
+      }
       const newId = await insertInvoiceRemote(v.store.trim(), v.date || '', items, ixVatRate(v), (v.invoiceNumber||'').trim(), v.paymentType || '');
       v.saved = true; v.saveError = ''; ok++;
       if((v.receiptNumber||'').trim()) await saveReceiptNumber(newId, v.receiptNumber);
@@ -4520,7 +4546,7 @@ async function ixSaveAll(){
   ixEl('ixSuppliers').innerHTML = ixKnownSuppliers().sort().map(s=> `<option value="${escapeHtml(s)}">`).join('');
   ixRenderAll();
   const left = ix.invs.filter(v=> !v.saved && !v.skipped).length;
-  ixToast(`✓ اتحفظت ${ok} فاتورة` + (fail ? ` — فشل ${fail}` : '') + (left ? ` — فاضل ${left} محتاجين مراجعة` : ''));
+  ixToast(`✓ اتحفظت ${ok} فاتورة` + (numbered ? ` (منهم ${numbered} كانت متسجلة من غير رقم واتسجل رقمها بس)` : '') + (fail ? ` — فشل ${fail}` : '') + (left ? ` — فاضل ${left} محتاجين مراجعة` : ''));
 }
 
 ixEl('ixCloseBtn').addEventListener('click', ixClose);
@@ -4734,7 +4760,7 @@ function dhRender(){
     ${sec('dates','تواريخ مشكوك فيها','تاريخ ناقص أو في المستقبل أو أقدم من سنة — غالبًا اتقرا غلط', c.dates.length, c.dates.map(d=> invRow(d.inv, escapeHtml(d.why), act(`<button class="ap-link" data-dismiss="date:${escapeHtml(String(d.inv.id))}">التاريخ صح</button>`))).join(''), 'err')}
     ${sec('empty','فواتير فاضية أو إجماليها صفر','', c.empty.length, c.empty.map(inv=> invRow(inv, '', act(`<button class="ap-btn danger" data-del="${escapeHtml(String(inv.id))}">امسحها</button>`))).join(''), 'err')}
     ${sec('noStore','فواتير من غير مورد','', c.noStore.length, c.noStore.map(inv=> invRow(inv)).join(''), 'err')}
-    ${sec('noNumber','فواتير من غير رقم','البرنامج مش هيقدر يمنع تكرارها أو يطابقها مع كشف الحساب', c.noNumber.length, (c.noNumber.length ? `<div style="font-size:13px;line-height:1.9;margin:4px 0 10px;background:var(--paper-raised);border:1px solid var(--line);border-radius:5px;padding:8px 12px;">مش محتاج تراجعهم واحدة واحدة: ارفع <b>كشف حساب</b> كل مورد من تبويب "كشف حساب الموردين"، والبرنامج هيملا الأرقام لوحده من الكشف لأي فاتورة مبلغها وتاريخها مطابقين.<br>${[...c.noNumber.reduce((m,inv)=> m.set(inv.store||'—', (m.get(inv.store||'—')||0)+1), new Map()).entries()].sort((a,b)=> b[1]-a[1]).map(([st,n])=> `<span style="display:inline-block;margin-inline-end:14px;" dir="auto">${escapeHtml(st)}: <b>${n}</b></span>`).join('')}</div>` : '') + c.noNumber.map(inv=> invRow(inv, '', act(`<button class="ap-link" data-dismiss="nonum:${escapeHtml(String(inv.id))}">مالهاش رقم فعلًا</button>`))).join(''), 'warn')}
+    ${sec('noNumber','فواتير من غير رقم','البرنامج مش هيقدر يمنع تكرارها أو يطابقها مع كشف الحساب', c.noNumber.length, (c.noNumber.length ? `<div style="font-size:13px;line-height:1.9;margin:4px 0 10px;background:var(--paper-raised);border:1px solid var(--line);border-radius:5px;padding:8px 12px;">مش محتاج تراجعهم واحدة واحدة: ارفع <b>كشف حساب</b> كل مورد من تبويب "كشف حساب الموردين"، والبرنامج هيملا الأرقام لوحده من الكشف لأي فاتورة مبلغها وتاريخها مطابقين.<br>${[...c.noNumber.reduce((m,inv)=> m.set(inv.store||'—', (m.get(inv.store||'—')||0)+1), new Map()).entries()].sort((a,b)=> b[1]-a[1]).map(([st,n])=> `<span style="display:inline-block;margin-inline-end:14px;" dir="auto">${escapeHtml(st)}: <b>${n}</b></span>`).join('')}<br><b>حسب الشهر:</b> ${[...c.noNumber.reduce((m,inv)=> { const k = (inv.date||'').slice(0,7) || 'من غير تاريخ'; return m.set(k, (m.get(k)||0)+1); }, new Map()).entries()].sort((a,b)=> a[0].localeCompare(b[0])).map(([k,n])=> `<span style="display:inline-block;margin-inline-end:14px;">${escapeHtml(k)}: <b>${n}</b></span>`).join('')}<br>أو ارفع صور فواتير الشهر ده تاني من "+ إضافة فواتير": أي فاتورة متسجلة من غير رقم هيتسجل رقمها على السجل القديم من غير ما تتكرر.</div>` : '') + c.noNumber.map(inv=> invRow(inv, '', act(`<button class="ap-link" data-dismiss="nonum:${escapeHtml(String(inv.id))}">مالهاش رقم فعلًا</button>`))).join(''), 'warn')}
     ${dh.dismissed.size ? `<div style="margin-top:10px;"><button class="ap-link" data-reset="1">رجّع كل اللي اتعلّم عليه "سليم" (${dh.dismissed.size})</button></div>` : ''}`;
   dhUpdateBadge();
 }
