@@ -1547,7 +1547,21 @@ function normName(n){ return (n||'').trim().replace(/\s+/g,' '); }
 // مفتاح متسامح: بيتجاهل الفرق في الحروف الكبيرة/الصغيرة والمسافات والعلامات (- , . ( ) /)
 // عشان "(1X10KG) - FROZEN" و "(1X10KG)-FROZEN" يبقوا نفس الصنف
 function canonProductName(n){
-  return (n||'').toUpperCase().replace(/[^A-Z0-9\u0600-\u06FF]+/g,' ').trim();
+  // كمان بيوحّد الكتابة العربية اليدوية: أ/إ/آ = ا، ة = ه، ى = ي، والتشكيل والمدّة بتتشال
+  return (n||'').toUpperCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g,'')
+    .replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي')
+    .replace(/[^A-Z0-9\u0600-\u06FF]+/g,' ').trim()
+    // "الفروج كامله" = "فروج كامل": "ال" في الأول والـ"ه" في الآخر مش بيفرقوا الصنف
+    .split(' ').map(w=> /^[\u0600-\u06FF]{4,}$/.test(w) ? w.replace(/^ال(?=[\u0600-\u06FF]{3})/,'').replace(/ه$/,'') : w).join(' ');
+}
+// نفس الوحدة مكتوبة بأكتر من شكل (KG / كيلو / كجم) = وحدة واحدة
+function unitKey(u){
+  const x = normName(u||'').toUpperCase().replace(/\.$/,'');
+  if(/^(KG|KGS|KILO|KILOS|كيلو|كيلوجرام|كجم|كغ|ك)$/.test(x)) return 'KG';
+  if(/^(L|LT|LTR|LTRS|LITRE|LITER|LITRES|LITERS|لتر)$/.test(x)) return 'L';
+  if(/^(PC|PCS|PIECE|PIECES|حبة|حبه|قطعة|قطعه)$/.test(x)) return 'PC';
+  return x;
 }
 function baseProductKey(it){
   return 'nm:' + canonProductName(it.name);
@@ -1557,7 +1571,7 @@ function canonStoredKey(k){
   if(!k || !k.startsWith('nm:')) return k;
   const i = k.indexOf('|u:');
   const name = i >= 0 ? k.slice(3, i) : k.slice(3);
-  return 'nm:' + canonProductName(name) + (i >= 0 ? k.slice(i) : '');
+  return 'nm:' + canonProductName(name) + (i >= 0 ? '|u:' + unitKey(k.slice(i+3)) : '');
 }
 
 function productKey(it){
@@ -1573,7 +1587,7 @@ function productKey(it){
   if(conv && conv.has(unit)) return base;
   // نفس المنتج ممكن يتباع بوحدات مختلفة (كرتونة، كيس، حبة) وأسعارها مش قابلة للمقارنة
   // مباشرة من غير معامل تحويل، فبنتابعهم كسجلات منفصلة عشان الرسم البياني يفضل صحيح
-  return base + '|u:' + unit;
+  return base + '|u:' + unitKey(unit);
 }
 
 function getProductSeries(){
