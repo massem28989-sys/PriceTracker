@@ -4202,6 +4202,11 @@ function ixIssues(v){
   if(valid.length && c.state === 'err') errs.push(`مجموع الأصناف ${ixFmt(c.mine)} مش مساوي الإجمالي المطبوع ${ixFmt(c.target)} (${c.label}) — الفرق ${ixFmt(Math.abs(c.diff))}. قارن الأسطر بالصورة.`);
   const dupDb = ixDupInDb(v);
   const unm = dupDb ? null : ixUnnumberedMatch(v);
+  if(!unm && !dupDb && v.invoiceNumber && v.store && !v.isCredit){
+    const dd = (x,y)=> (x && y) ? Math.abs((new Date(x) - new Date(y)) / 86400000) : 99;
+    const near = invoices.filter(i=> i.store === v.store && !i.invoiceNumber && dd(i.date, v.date) <= 3);
+    if(near.length) errs.push(`ممكن تكون متكررة: عند ${v.store} فيه ${near.length} فاتورة متسجلة من غير رقم في نفس الأيام (${near.slice(0,4).map(i=> (i.date||'') + ' بمبلغ ' + ixFmt((i.items||[]).reduce((t,it)=> t + (Number(it.price)||0), 0))).join('، ')}) والمبلغ مش مطابق. لو دي نفس الفاتورة، صحّح السجل القديم أو امسحه بدل ما تتسجل مرتين.`);
+  }
   if(unm) infos.unshift(`الفاتورة دي متسجلة عندك قبل كده من غير رقم (بتاريخ ${unm.date || '—'} وبنفس المبلغ). لما تحفظ، البرنامج هيسجّل رقمها ${v.invoiceNumber} على السجل القديم بس، ومش هيكررها.`);
   if(dupDb) errs.push(`${v.isCredit ? 'المرتجع' : 'الفاتورة'} رقم ${v.invoiceNumber} من ${v.store} ${v.isCredit ? 'متسجل' : 'متسجلة'} قبل كده بتاريخ ${dupDb.date || '—'}`);
   if(v.isCredit) infos.unshift('ده <b>مرتجع / إشعار دائن</b> مش فاتورة شراء، فالبرنامج اتجاهله ومش هيحفظه (المرتجعات بتتسجل على الـ ERP). لو هو فاتورة شراء فعلًا غيّر "نوع المستند" ورجّعها.');
