@@ -4950,6 +4950,21 @@ function rcLinkVerdict(rec, inv){
   if(known && (inv.items||[]).some(x=> ilNameKnown(x.name))) return 'conflict';
   return 'unknown';
 }
+// هل السطور شبه بعض فعلًا؟ (مش بس نفس الإجمالي صدفة)
+function rcWords(n){ return new Set(arNorm(n||'').split(' ').filter(w=> w.length >= 4 && !/^\d/.test(w))); }
+function rcFit(rec, inv){
+  if(rcLinkVerdict(rec, inv) === 'match') return 'good';
+  const pairs = rcPairLines(rec, inv);
+  if(!pairs.length) return 'poor';
+  // كلمة مشتركة في الاسم (Maida / Jalapeno / Tork ...)
+  if(pairs.some(p=>{ const a = rcWords(p.rec.name), b = rcWords(p.inv.name); return [...a].some(w=> b.has(w)); })) return 'good';
+  // أكتر من سطر كل واحد بنفس إجمالي سطر في الفاتورة ⇒ صعب تبقى صدفة
+  if(rec.items.length >= 2 && pairs.length >= 2 && pairs.length >= Math.ceil(rec.items.length * 0.6)) return 'good';
+  // سطر واحد: لازم الكمية أو سعر الوحدة يبقوا زي بعض
+  const same = pairs.filter(p=>{ const iq = Number(p.inv.qty)||0, ip = iq ? (Number(p.inv.price)||0) / iq : 0;
+    return Math.abs(iq - p.rec.qty) < 0.001 || (p.rec.price > 0 && Math.abs(ip - p.rec.price) / p.rec.price <= 0.01); });
+  return same.length ? 'good' : 'poor';
+}
 // بنتعلّم الروابط من السندات المربوطة بالرقم أو اللي اتربطت يدوي
 async function rcLearn(rows){
   if(!(currentWorkspace && currentWorkspace.role === 'owner')) return 0;
@@ -4997,15 +5012,16 @@ function matchReceipts(recs){
   const rej = rcRejected();
   const cands0 = (rec)=> free.filter(i=> !used.has(i.id) && !rej.has(rec.no + '|' + i.id) && Math.abs(invSub(i) - rec.total) <= 1 && Math.abs(rcDays(rec.date, i.date)) <= 3 && (!codeName(rec.supCode) || i.store === codeName(rec.supCode)));
   // الأصناف بتحسم: نشيل اللي أصنافه متعارضة، ولو فيه واحد أصنافه متطابقة ناخده
-  const cands = (rec)=>{ const c = cands0(rec).filter(i=> rcLinkVerdict(rec, i) !== 'conflict'); const m = c.filter(i=> rcLinkVerdict(rec, i) === 'match'); return m.length === 1 ? m : c; };
+  const cands = (rec)=>{ const c = cands0(rec).filter(i=> rcLinkVerdict(rec, i) !== 'conflict'); const m = c.filter(i=> rcLinkVerdict(rec, i) === 'match'); if(m.length === 1) return m; if(c.length > 1){ const g = c.filter(i=> rcFit(rec, i) === 'good'); if(g.length === 1) return g; } return c; };
   const later = [];
   // سند من غير كود مورد (نقدي): المبلغ والتاريخ لوحدهم ممكن يتطابقوا صدفة ⇒ "ضعيف" ولازم مراجعة الأصناف قبل الربط
-  const weak = (rec, inv)=> !rec.supCode && !(inv && rcLinkVerdict(rec, inv) === 'match');
-  pending.forEach(rec=>{ const c = cands(rec); if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec, c[0]), items: rcLinkVerdict(rec, c[0]), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); } else later.push(rec); });
+  // ضعيف = محتاج مراجعة يدوي ومش بيتربط مع الكل: سند نقدي من غير أصناف مربوطة، أو أي سند أصنافه/كمياته مش شبه الفاتورة
+  const weak = (rec, inv)=> !inv || rcFit(rec, inv) === 'poor' || (!rec.supCode && rcLinkVerdict(rec, inv) !== 'match');
+  pending.forEach(rec=>{ const c = cands(rec); if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec, c[0]), fit: rcFit(rec, c[0]), items: rcLinkVerdict(rec, c[0]), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); if(rcFit(rec, c[0]) === 'good') vote(rec.supCode, c[0].store); } else later.push(rec); });
   later.forEach(rec=>{
     let c = cands(rec);
     if(c.length > 1){ const same = c.filter(i=> i.date === rec.date); if(same.length === 1) c = same; }
-    if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec, c[0]), items: rcLinkVerdict(rec, c[0]), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); }
+    if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec, c[0]), fit: rcFit(rec, c[0]), items: rcLinkVerdict(rec, c[0]), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); if(rcFit(rec, c[0]) === 'good') vote(rec.supCode, c[0].store); }
     else if(c.length > 1) out.push({ rec, invs: [], options: c, by: '', status: 'ambiguous', diff: null });
     else out.push({ rec, invs: [], by: '', status: 'no_invoice', diff: null });
   });
@@ -5059,8 +5075,9 @@ function rcRender(){
   const diffs = R.filter(r=> r.status === 'diff');
   const line = (r)=>{
     let [lbl, cls] = RC_LABEL[r.status];
-    if(r.weak) lbl = '≈ نفس المبلغ والتاريخ بس — قارن الأصناف';
+    if(r.weak) lbl = r.fit === 'poor' ? '⚠ نفس المبلغ بس الأصناف والكميات مختلفة — راجع' : '≈ نفس المبلغ والتاريخ بس — قارن الأصناف';
     else if(r.status === 'approx' && r.items === 'match') lbl = '≈ مطابق بالمبلغ والأصناف — اربطه';
+    if(r.weak && r.fit === 'poor') cls = 'err';
     if(r.items === 'conflict'){ lbl = '⚠ الأصناف مش زي بعض'; cls = 'err'; }
     const inv = r.invs[0];
     const invTxt = r.invs.length ? r.invs.map(i=> `${escapeHtml(i.invoiceNumber || 'بدون رقم')} · ${escapeHtml(i.date||'')}`).join('<br>') : (r.options ? `<span style="font-size:11px;">${r.options.map(i=> escapeHtml((i.invoiceNumber||'؟') + ' · ' + i.store)).join('<br>')}</span>` : '—');
@@ -5090,7 +5107,7 @@ function rcRender(){
       <div class="ap-kpi ${cashWrong.length ? 'bad' : ''}"><div class="lbl">متسجل نقدي وهو آجل</div><div class="val">${cashWrong.length}</div><div class="sub">${apFmt(sum(cashWrong, r=> r.rec.total))} — كود المورد غلط في المخزن</div></div>
     </div>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;line-height:1.8;">
-      ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && R.some(r=> r.status === 'approx' && !r.weak) && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${R.filter(r=> r.status === 'approx' && !r.weak).length})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}${R.some(r=> r.weak) ? ` · ${R.filter(r=> r.weak).length} سند "مورد نقدي" اتطابق بالمبلغ والتاريخ بس — مش بيتربط مع الكل، افتح كل واحد وقارن الأصناف واربطه لوحده` : ''}
+      ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && R.some(r=> r.status === 'approx' && !r.weak) && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${R.filter(r=> r.status === 'approx' && !r.weak).length})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}${R.some(r=> r.weak) ? ` · ${R.filter(r=> r.weak).length} سند المبلغ بس اللي متطابق (الأصناف أو الكميات مش شبه بعض، أو مورد نقدي) — مش بيتربط مع الكل، افتح كل واحد وقارن واربطه لوحده لو صح` : ''}
       · المبالغ قبل الضريبة · اضغط على أي صف تشوف الأصناف
     </div>
     <div class="ix-filters" style="padding:0 0 8px;border:none;">${monthSel}${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
