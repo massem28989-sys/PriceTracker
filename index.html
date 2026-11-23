@@ -4989,6 +4989,7 @@ function matchReceipts(recs){
   const lo = Math.min(...nos), hi = Math.max(...nos);
   const dates = recs.map(r=> r.date).filter(Boolean).sort();
   const dFrom = dates[0], dTo = dates[dates.length-1];
+  const recMonths = new Set(dates.map(d=> d.slice(0,7)));
   const byNo = new Map();
   invoices.forEach(inv=> receiptNos(inv.receiptNumber).forEach(n=>{ if(!byNo.has(n)) byNo.set(n, []); byNo.get(n).push(inv); }));
   const used = new Set(); const out = [];
@@ -5027,7 +5028,7 @@ function matchReceipts(recs){
   });
   // 3) فواتير الفترة اللي مالهاش سند في الملف
   invoices.forEach(inv=>{
-    if(used.has(inv.id) || !inv.date || inv.date < dFrom || inv.date > dTo) return;
+    if(used.has(inv.id) || !inv.date || inv.date < dFrom || inv.date > dTo || !recMonths.has(inv.date.slice(0,7))) return;
     const ns = receiptNos(inv.receiptNumber).map(Number);
     if(ns.length && ns.every(n=> n < lo || n > hi)) out.push({ rec: null, invs: [inv], by: '', status: 'other_store', diff: null });
     else out.push({ rec: null, invs: [inv], by: '', status: 'no_receipt', diff: null, hasNo: ns.length > 0 });
@@ -5168,9 +5169,17 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
     const invDates = invoices.map(i=> i.date).filter(Boolean).sort();
     let trimNote = '';
     if(invDates.length){
-      const months = new Set(invDates.map(d=> d.slice(0,7)));
+      // الشهر يدخل المطابقة بس لو فواتيره مرفوعة فعلًا (على الأقل ربع عدد السندات أو 20 فاتورة)
+      const invCnt = new Map(); invDates.forEach(d=> invCnt.set(d.slice(0,7), (invCnt.get(d.slice(0,7))||0) + 1));
+      const recCnt = new Map(); recs.forEach(r=> r.date && recCnt.set(r.date.slice(0,7), (recCnt.get(r.date.slice(0,7))||0) + 1));
+      const months = new Set([...invCnt.entries()].filter(([m, n])=> n >= Math.min(20, Math.ceil((recCnt.get(m)||0) * 0.25))).map(([m])=> m));
+      const skipped = [...recCnt.keys()].filter(m=> !months.has(m)).sort();
       const kept = recs.filter(r=> !r.date || months.has(r.date.slice(0,7)));
-      if(kept.length && kept.length < allN){ trimNote = ` — الملف فيه ${allN} سند، واتطابق منهم ${kept.length} في الشهور اللي فيها فواتير في البرنامج (${[...months].sort().join('، ')})`; recs = kept; }
+      if(kept.length && kept.length < allN){
+        trimNote = ` — الملف فيه ${allN} سند، واتطابق منهم ${kept.length} في الشهور اللي فواتيرها مرفوعة (${[...months].sort().join('، ')})`;
+        if(skipped.length) trimNote += `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">شهور اتسابت لأن فواتيرها مش مرفوعة في البرنامج: ${skipped.map(m=> `${m} (${invCnt.get(m)||0} فاتورة قصاد ${recCnt.get(m)} سند)`).join('، ')} — ارفع فواتيرها وبعدين ارفع الملف تاني.</div>`;
+        recs = kept;
+      }
     }
     rc.recs = recs; rc.fileName = f.name; rc.open = new Set(); rc.filter = 'problems';
     rc.results = matchReceipts(recs);
