@@ -5041,7 +5041,11 @@ function rcRender(){
     document.getElementById('rcSetup').style.display = 'block';
   }
   if(!rc.results.length){ box.innerHTML = ''; return; }
-  const R = rc.results;
+  const rMonth = (r)=> ((r.rec && r.rec.date) || (r.invs[0] && r.invs[0].date) || '').slice(0,7);
+  const monthsAll = [...new Set(rc.results.map(rMonth).filter(Boolean))].sort();
+  if(rc.month && !monthsAll.includes(rc.month)) rc.month = '';
+  const R = rc.month ? rc.results.filter(r=> rMonth(r) === rc.month) : rc.results;
+  const monthSel = `<select id="rcMonth" style="padding:4px 8px;border:1px solid var(--line);border-radius:14px;font-family:inherit;font-size:12px;background:var(--white);"><option value="">كل الشهور</option>${monthsAll.map(m=>{ const rr = rc.results.filter(r=> rMonth(r) === m); const ok = rr.filter(r=> r.status === 'ok' || r.status === 'approx').length, recs = rr.filter(r=> r.rec).length; return `<option value="${m}" ${rc.month===m?'selected':''}>${m} — ${recs} سند، ${recs ? Math.round(ok / recs * 100) : 0}% متطابق</option>`; }).join('')}</select>`;
   const cnt = (s)=> R.filter(r=> r.status === s).length;
   const sum = (arr, f)=> arr.reduce((t,r)=> t + f(r), 0);
   const isOwner = currentWorkspace && currentWorkspace.role === 'owner';
@@ -5089,7 +5093,7 @@ function rcRender(){
       ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && R.some(r=> r.status === 'approx' && !r.weak) && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${R.filter(r=> r.status === 'approx' && !r.weak).length})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}${R.some(r=> r.weak) ? ` · ${R.filter(r=> r.weak).length} سند "مورد نقدي" اتطابق بالمبلغ والتاريخ بس — مش بيتربط مع الكل، افتح كل واحد وقارن الأصناف واربطه لوحده` : ''}
       · المبالغ قبل الضريبة · اضغط على أي صف تشوف الأصناف
     </div>
-    <div class="ix-filters" style="padding:0 0 8px;border:none;">${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
+    <div class="ix-filters" style="padding:0 0 8px;border:none;">${monthSel}${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
       <button class="ap-btn" id="rcExport" style="margin-inline-start:auto;padding:4px 12px;font-size:12px;">تصدير Excel</button></div>
     <div class="ap-scroll"><table class="ap-table">
       <thead><tr><th>الحالة</th><th>رقم السند</th><th>تاريخ الاستلام</th><th>المورد</th><th class="n">إجمالي الاستلام</th><th>الفاتورة</th><th class="n">إجمالي الفاتورة</th><th class="n">الفرق</th><th></th></tr></thead>
@@ -5161,6 +5165,7 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
   }catch(err){ console.error(err); st.innerHTML = `<div class="error-box">تعذّر قراءة الملف: ${escapeHtml(err.message || String(err))}</div>`; }
   e.target.value = '';
 });
+document.getElementById('rcResult').addEventListener('change', (e)=>{ if(e.target.id === 'rcMonth'){ rc.month = e.target.value; rcRender(); } });
 document.getElementById('rcResult').addEventListener('click', async (e)=>{
   const t = e.target.closest('[data-rcfilter],[data-rclink],[data-rcunlink],[data-rclinkall],#rcExport,[data-rckey]'); if(!t) return;
   if(t.dataset.rcunlink){
@@ -5172,7 +5177,7 @@ document.getElementById('rcResult').addEventListener('click', async (e)=>{
   }
   if(t.dataset.rcfilter){ rc.filter = t.dataset.rcfilter; return rcRender(); }
   if(t.id === 'rcExport') return rcExport();
-  if(t.dataset.rclinkall){ t.disabled = true; t.textContent = 'جاري الربط...'; return rcLink(rc.results.filter(r=> r.status === 'approx' && !r.weak)); }
+  if(t.dataset.rclinkall){ t.disabled = true; t.textContent = 'جاري الربط...'; const mm = (r)=> ((r.rec && r.rec.date) || '').slice(0,7); return rcLink(rc.results.filter(r=> r.status === 'approx' && !r.weak && (!rc.month || mm(r) === rc.month))); }
   if(t.dataset.rclink){ e.stopPropagation(); t.disabled = true; return rcLink(rc.results.filter(r=> 'r' + (r.rec && r.rec.no) === t.dataset.rclink)); }
   if(t.dataset.rckey){ const k = t.dataset.rckey; rc.open.has(k) ? rc.open.delete(k) : rc.open.add(k); rcRender(); }
 });
