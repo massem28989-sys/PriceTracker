@@ -606,6 +606,7 @@ table.items input.num{font-family:'JetBrains Mono',monospace;direction:ltr;text-
       <div id="rcSetup" class="ap-banner" style="display:none;">عشان رقم السند يتحفظ مع الفواتير، شغّل ملف <span class="mono">supabase-schema-v21-receipt-number.sql</span> في Supabase ← SQL Editor مرة واحدة. لحد ما تعمل كده المطابقة هتبقى بالمبلغ والتاريخ بس.</div>
       <label class="ap-btn primary" style="display:inline-block;cursor:pointer;">اختار ملف الاستلامات<input type="file" id="rcFileInput" accept=".xls,.xlsx" hidden></label>
       <div id="rcStatus" style="margin-top:8px;"></div>
+      <div id="rcImportBox"></div>
       <div id="rcResult"></div>
     </div>
     <div class="section-title">
@@ -4981,6 +4982,65 @@ async function rcUnlearn(rec, inv){
     if(!itemLinksMissing && currentWorkspace) await sb.from('item_links').delete().eq('workspace_id', currentWorkspace.id).eq('wh_code', String(p.rec.code)).eq('inv_name', ilKey(p.inv.name));
   }
 }
+// ---------- تسجيل سندات المخزن كفواتير (للشهور اللي فواتيرها مش مرفوعة) ----------
+function rcPrettyName(code, whName){
+  const s = itemLinks.get(String(code)); if(!s || !s.size) return whName;
+  const keys = [...s];
+  for(const inv of invoices) for(const it of (inv.items||[])) if(keys.includes(ilKey(it.name))) return it.name;
+  return whName;
+}
+function rcImportPlan(months, includeCash){
+  matchReceipts(rc.allRecs); const codeMap = rc.codeMap; // أسماء الموردين متعلّمة من كل الشهور
+  const taken = new Set(); invoices.forEach(i=> receiptNos(i.receiptNumber).forEach(n=> taken.add(n)));
+  const res = matchReceipts(rc.allRecs.filter(r=> r.date && months.includes(r.date.slice(0,7)))); rc.codeMap = codeMap;
+  const recs = res.filter(r=> r.status === 'no_invoice' && r.rec && !taken.has(r.rec.no) && (includeCash || !r.rec.cash) && r.rec.items.length).map(r=> r.rec);
+  const sups = new Map(); // اسم المخزن -> {code, n, total, mapped}
+  recs.forEach(r=>{ const k = r.cash ? 'مورد نقدي' : (r.supName || ('كود ' + r.supCode)); const o = sups.get(k) || { code: r.supCode, n: 0, total: 0, mapped: r.supCode ? (rc.codeMap.get(r.supCode) || '') : '' }; o.n++; o.total += r.total; sups.set(k, o); });
+  return { recs, sups, cash: res.filter(r=> r.status === 'no_invoice' && r.rec && r.rec.cash).length, skippedMatched: res.filter(r=> r.rec && r.status !== 'no_invoice').length };
+}
+function rcImportOpen(months){
+  const box = document.getElementById('rcImportBox'); if(!box) return;
+  const includeCash = !!(document.getElementById('rcImpCash') || {}).checked;
+  const plan = rcImportPlan(months, includeCash); rc.importPlan = { plan, months };
+  const appSups = [...new Set(invoices.map(i=> i.store).filter(Boolean))].sort((a,b)=> a.localeCompare(b,'ar'));
+  const rows = [...plan.sups.entries()].sort((a,b)=> b[1].n - a[1].n);
+  box.innerHTML = `<div style="border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:10px 0;background:var(--paper-raised);">
+    <b>تسجيل سندات ${months.join('، ')} كفواتير</b>
+    <div style="font-size:13px;line-height:1.9;margin:4px 0 8px;">هيتسجل <b>${plan.recs.length}</b> فاتورة (${apFmt(plan.recs.reduce((t,r)=> t + r.total, 0))} قبل الضريبة)، كل واحدة برقم السند بتاعها، والأصناف بأساميها في الفواتير لو الصنف مربوط، وإلا باسمه في المخزن.
+      ${plan.skippedMatched ? `<br>${plan.skippedMatched} سند ليهم فاتورة متسجلة أصلًا — مش هيتكرروا.` : ''}
+      <br><label><input type="checkbox" id="rcImpCash" ${includeCash ? 'checked' : ''}> سجّل كمان سندات "مورد نقدي" (${plan.cash}) تحت اسم "مورد نقدي"</label></div>
+    <div class="ap-scroll" style="max-height:300px;"><table class="ap-table" style="min-width:0;"><thead><tr><th>المورد في المخزن</th><th class="n">سندات</th><th class="n">الإجمالي</th><th>يتسجل باسم</th></tr></thead><tbody>
+      ${rows.map(([k,o])=> `<tr><td dir="auto">${escapeHtml(k)}${o.code ? ` <span class="mono" style="font-size:11px;color:var(--ink-soft);">${escapeHtml(o.code)}</span>` : ''}</td><td class="n">${o.n}</td><td class="n">${apFmt(o.total)}</td>
+        <td><select data-impsup="${escapeHtml(k)}" style="padding:4px;border:1px solid var(--line);border-radius:3px;font-family:inherit;max-width:320px;${o.mapped ? '' : 'border-color:var(--brick);'}">
+          <option value="">${escapeHtml(k)} (اسم المخزن)</option>${appSups.map(a=> `<option ${a === o.mapped ? 'selected' : ''}>${escapeHtml(a)}</option>`).join('')}</select></td></tr>`).join('')}
+    </tbody></table></div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">الأحمر = البرنامج مش عارف المورد ده اسمه إيه عندك — اختاره من القايمة عشان مايتعملش مورد جديد بالاسم العربي.</div>
+    <div style="margin-top:10px;display:flex;gap:8px;"><button class="btn btn-primary" id="rcImpGo" style="background:var(--pine-deep);color:var(--white);" ${plan.recs.length ? '' : 'disabled'}>سجّل ${plan.recs.length} فاتورة</button><button class="btn btn-ghost" id="rcImpCancel">إلغاء</button></div>
+    <div id="rcImpStatus" style="margin-top:8px;font-size:13px;"></div></div>`;
+}
+async function rcImportRun(){
+  const { plan } = rc.importPlan; const st = document.getElementById('rcImpStatus'); const btn = document.getElementById('rcImpGo'); btn.disabled = true;
+  const supMap = new Map(); document.querySelectorAll('[data-impsup]').forEach(s=> supMap.set(s.dataset.impsup, s.value));
+  let ok = 0, fail = 0;
+  for(const r of plan.recs){
+    const k = r.cash ? 'مورد نقدي' : (r.supName || ('كود ' + r.supCode));
+    const store = supMap.get(k) || k;
+    const items = r.items.map(it=> ({ name: rcPrettyName(it.code, it.name || it.code), qty: it.qty || 1, unit: it.unit || '', price: Math.round(it.total * 100) / 100 }));
+    const vat = supplierVatRatesMap.has(store) ? supplierVatRatesMap.get(store) : 5;
+    const pay = r.cash ? 'cash' : ((supplierPaymentMap.get(store) || {}).type || '');
+    try{ const id = await insertInvoiceRemote(store, r.date, items, vat, '', pay); await saveReceiptNumber(id, r.no); ok++; }
+    catch(e){ console.error(e); fail++; }
+    if((ok + fail) % 10 === 0) st.textContent = `جاري التسجيل... ${ok + fail} / ${plan.recs.length}`;
+  }
+  st.innerHTML = `✓ اتسجل ${ok} فاتورة${fail ? ` — فشل ${fail}` : ''}. ارفع ملف الاستلامات تاني عشان تتطابق.`;
+  await refreshInvoicesFromServer(); renderAll();
+}
+document.addEventListener('click', (e)=>{
+  if(e.target.id === 'rcImportOpen'){ e.preventDefault(); rcImportOpen(e.target.dataset.months.split(',')); }
+  else if(e.target.id === 'rcImpGo') rcImportRun();
+  else if(e.target.id === 'rcImpCancel'){ const b = document.getElementById('rcImportBox'); if(b) b.innerHTML = ''; }
+});
+document.addEventListener('change', (e)=>{ if(e.target.id === 'rcImpCash' && rc.importPlan) rcImportOpen(rc.importPlan.months); });
 // أزواج (سند|فاتورة) اتفك ربطها يدوي — مايتقترحوش تاني
 function rcRejected(){ try{ return new Set(JSON.parse(localStorage.getItem('rcRejected') || '[]')); }catch(_){ return new Set(); } }
 function rcReject(no, invId){ try{ const s = rcRejected(); s.add(no + '|' + invId); localStorage.setItem('rcRejected', JSON.stringify([...s])); }catch(_){} }
@@ -5033,6 +5093,7 @@ function matchReceipts(recs){
     if(ns.length && ns.every(n=> n < lo || n > hi)) out.push({ rec: null, invs: [inv], by: '', status: 'other_store', diff: null });
     else out.push({ rec: null, invs: [inv], by: '', status: 'no_receipt', diff: null, hasNo: ns.length > 0 });
   });
+  rc.codeMap = new Map([...codeVotes.keys()].map(c=> [c, codeName(c)]));
   out.forEach(r=>{
     r.supplier = r.invs.length ? r.invs[0].store : (r.rec ? (codeName(r.rec.supCode) || r.rec.supName || '') : '');
     // سند متسجل "مورد نقدي" (كود 0) بس الفاتورة من مورد بيتعامل آجل ⇒ غلط في سيستم المخازن
@@ -5164,6 +5225,7 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
       try{ recs = parseReceiptsSheet(rows); if(recs.length) break; }catch(e2){ firstErr = firstErr || e2; recs = null; }
     }
     if(!recs || !recs.length) throw (firstErr || new Error('مفيش سندات استلام في الملف'));
+    rc.allRecs = recs.slice();
     // لو الملف أطول من الفواتير اللي في البرنامج، نطابق الفترة اللي فيها فواتير بس
     const allN = recs.length;
     const invDates = invoices.map(i=> i.date).filter(Boolean).sort();
@@ -5177,7 +5239,7 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
       const kept = recs.filter(r=> !r.date || months.has(r.date.slice(0,7)));
       if(kept.length && kept.length < allN){
         trimNote = ` — الملف فيه ${allN} سند، واتطابق منهم ${kept.length} في الشهور اللي فواتيرها مرفوعة (${[...months].sort().join('، ')})`;
-        if(skipped.length) trimNote += `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">شهور اتسابت لأن فواتيرها مش مرفوعة في البرنامج: ${skipped.map(m=> `${m} (${invCnt.get(m)||0} فاتورة قصاد ${recCnt.get(m)} سند)`).join('، ')} — ارفع فواتيرها وبعدين ارفع الملف تاني.</div>`;
+        if(skipped.length) trimNote += `<div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">شهور اتسابت لأن فواتيرها مش مرفوعة في البرنامج: ${skipped.map(m=> `${m} (${invCnt.get(m)||0} فاتورة قصاد ${recCnt.get(m)} سند)`).join('، ')} — ارفع فواتيرها وبعدين ارفع الملف تاني، <b>أو</b> ${currentWorkspace && currentWorkspace.role === 'owner' ? `<button class="ap-link" id="rcImportOpen" data-months="${skipped.join(',')}">سجّل سندات الشهور دي كفواتير على طول</button>` : 'صاحب مساحة العمل يقدر يسجّل سنداتها كفواتير على طول'}.</div>`;
         recs = kept;
       }
     }
