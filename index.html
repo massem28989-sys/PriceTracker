@@ -4836,6 +4836,8 @@ async function saveReceiptNumber(id, value){
 // ---------- قراءة ملف استلامات المخزن ----------
 function rcCell(v){ return v === null || v === undefined ? '' : String(v).trim(); }
 function rcDate(v){
+  // Excel بيدّي التاريخ أحيانًا قبل نص الليل بثواني (23:59:59 من اليوم اللي قبله) — نقرّبه
+  if(v instanceof Date && !isNaN(v)) v = new Date(v.getTime() + 3*3600*1000);
   if(v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
   if(typeof v === 'number' && v > 20000) return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0,10);
   const s = rcCell(v); let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
@@ -4843,6 +4845,37 @@ function rcDate(v){
   return s.slice(0,10);
 }
 function rcNextVal(row, i){ for(let j=i+1;j<row.length;j++){ if(rcCell(row[j]) !== '') return row[j]; } return ''; }
+// شكل تاني: جدول مسطّح (كل سطر صنف وفيه رقم السند وكود/اسم المورد) زي شيت "كل الاستلامات"
+function parseReceiptsFlat(rows){
+  let h = -1, col = null;
+  for(let i = 0; i < Math.min(rows.length, 15); i++){
+    const r = rows[i]; const idx = (re)=> r.findIndex(c=> re.test(rcCell(c)));
+    if(idx(/^رقم السند$/) >= 0 && idx(/^كود الصنف$/) >= 0){
+      h = i;
+      col = { date: idx(/^(تاريخ|التاريخ)$/), no: idx(/^رقم السند$/), supCode: idx(/^كود المورد$/), supName: idx(/^اسم المورد$/), code: idx(/^كود الصنف$/), name: idx(/^(اسم|أسم) الصنف$/),
+        qty: idx(/^الكمية$/), unit: idx(/^الوحدة$/), price: idx(/^(سعر الوحدة في الفاتورة|السعر|سعر الوحدة)$/), total: idx(/^(الإجمالي|الأجمالى|الاجمالي)$/) };
+      break;
+    }
+  }
+  if(h < 0 || col.total < 0) return null;
+  const byNo = new Map();
+  for(let i = h + 1; i < rows.length; i++){
+    const r = rows[i]; const no = rcCell(r[col.no]); if(!no) continue;
+    const n = String(parseInt(no,10) || no);
+    const tot = parseFloat(rcCell(r[col.total]).replace(/,/g,'')); if(isNaN(tot)) continue;
+    let rec = byNo.get(n);
+    if(!rec){
+      const code = col.supCode >= 0 ? rcCell(r[col.supCode]) : '';
+      const cash = code === '0' || code === '0.0';
+      rec = { no: n, date: col.date >= 0 ? rcDate(r[col.date]) : '', supCode: code && !cash ? String(parseInt(code,10)) : '', supName: col.supName >= 0 ? rcCell(r[col.supName]) : '', cash, items: [], total: 0 };
+      byNo.set(n, rec);
+    }
+    rec.items.push({ code: rcCell(r[col.code]), name: col.name >= 0 ? rcCell(r[col.name]) : '', qty: parseFloat(rcCell(r[col.qty])) || 0, unit: col.unit >= 0 ? rcCell(r[col.unit]) : '', price: parseFloat(rcCell(r[col.price])) || 0, total: tot });
+    rec.total += tot;
+  }
+  const recs = [...byNo.values()]; recs.forEach(r=> r.total = Math.round(r.total * 100) / 100);
+  return recs;
+}
 function parseReceiptsSheet(rows){
   // أعمدة الأصناف من صف العناوين
   let col = null;
@@ -4862,7 +4895,7 @@ function parseReceiptsSheet(rows){
     if(head >= 0){
       const d = r.findIndex(c=> rcCell(c) === 'التاريخ'), sp = r.findIndex(c=> /^supplier$|^المورد$/i.test(rcCell(c)));
       const code = sp >= 0 ? rcCell(rcNextVal(r, sp)) : '';
-      cur = { no: String(parseInt(rcCell(rcNextVal(r, head)),10) || rcCell(rcNextVal(r, head))), date: d >= 0 ? rcDate(rcNextVal(r, d)) : '', supCode: code && code !== '0' && code !== '0.0' ? String(parseInt(code,10)) : '', items: [], total: 0 };
+      cur = { no: String(parseInt(rcCell(rcNextVal(r, head)),10) || rcCell(rcNextVal(r, head))), date: d >= 0 ? rcDate(rcNextVal(r, d)) : '', supCode: code && code !== '0' && code !== '0.0' ? String(parseInt(code,10)) : '', cash: code === '0' || code === '0.0', items: [], total: 0 };
       recs.push(cur); continue;
     }
     if(!cur) continue;
@@ -4925,7 +4958,18 @@ function matchReceipts(recs){
     if(ns.length && ns.every(n=> n < lo || n > hi)) out.push({ rec: null, invs: [inv], by: '', status: 'other_store', diff: null });
     else out.push({ rec: null, invs: [inv], by: '', status: 'no_receipt', diff: null, hasNo: ns.length > 0 });
   });
-  out.forEach(r=>{ r.supplier = r.invs.length ? r.invs[0].store : (r.rec ? codeName(r.rec.supCode) : ''); });
+  out.forEach(r=>{
+    r.supplier = r.invs.length ? r.invs[0].store : (r.rec ? (codeName(r.rec.supCode) || r.rec.supName || '') : '');
+    // سند متسجل "مورد نقدي" (كود 0) بس الفاتورة من مورد بيتعامل آجل ⇒ غلط في سيستم المخازن
+    if(r.rec && r.rec.cash && r.invs.length){
+      const st = r.invs[0].store;
+      const realCode = [...codeVotes.entries()].filter(([c, m])=> m.has(st)).sort((a,b)=> b[1].get(st) - a[1].get(st)).map(([c])=> c)[0]
+        || ((recs.find(x=> x.supCode && x.supName && canonProductName(x.supName) === canonProductName(st)) || {}).supCode) || '';
+      const sp = (typeof supplierPaymentMap !== 'undefined') ? supplierPaymentMap.get(st) : null;
+      const credit = (sp && sp.type === 'credit') || r.invs.some(i=> i.paymentType === 'credit') || (!!realCode && !(sp && sp.type === 'cash'));
+      if(credit && !/نقد|cash/i.test(st)) { r.cashWrong = true; r.realCode = realCode; }
+    }
+  });
   return out.sort((a,b)=> ((a.rec && a.rec.date) || (a.invs[0] && a.invs[0].date) || '').localeCompare((b.rec && b.rec.date) || (b.invs[0] && b.invs[0].date) || '') || String(a.rec ? a.rec.no : '').localeCompare(String(b.rec ? b.rec.no : '')));
 }
 const RC_LABEL = {
@@ -4944,8 +4988,9 @@ function rcRender(){
   const sum = (arr, f)=> arr.reduce((t,r)=> t + f(r), 0);
   const isOwner = currentWorkspace && currentWorkspace.role === 'owner';
   const problems = R.filter(r=> ['diff','no_invoice','no_receipt','ambiguous','approx'].includes(r.status));
-  const filters = [['problems','محتاج مراجعة', problems.length],['ok','مطابق', cnt('ok')],['approx','تقريبي', cnt('approx')],['diff','فرق مبلغ', cnt('diff')],['no_invoice','استلام من غير فاتورة', cnt('no_invoice')],['no_receipt','فاتورة من غير استلام', cnt('no_receipt')],['ambiguous','محتمل', cnt('ambiguous')],['other_store','مخزن تاني', cnt('other_store')],['all','الكل', R.length]].filter(f=> f[0]==='all' || f[0]==='problems' || f[2]);
-  const show = rc.filter === 'all' ? R : rc.filter === 'problems' ? problems : R.filter(r=> r.status === rc.filter);
+  const cashWrong = R.filter(r=> r.cashWrong);
+  const filters = [['problems','محتاج مراجعة', problems.length],['cashwrong','نقدي وهو آجل', cashWrong.length],['ok','مطابق', cnt('ok')],['approx','تقريبي', cnt('approx')],['diff','فرق مبلغ', cnt('diff')],['no_invoice','استلام من غير فاتورة', cnt('no_invoice')],['no_receipt','فاتورة من غير استلام', cnt('no_receipt')],['ambiguous','محتمل', cnt('ambiguous')],['other_store','مخزن تاني', cnt('other_store')],['all','الكل', R.length]].filter(f=> f[0]==='all' || f[0]==='problems' || f[2]);
+  const show = rc.filter === 'all' ? R : rc.filter === 'problems' ? problems : rc.filter === 'cashwrong' ? cashWrong : R.filter(r=> r.status === rc.filter);
   const recTotal = sum(R.filter(r=> r.rec), r=> r.rec.total);
   const recNoInv = R.filter(r=> r.status === 'no_invoice');
   const invNoRec = R.filter(r=> r.status === 'no_receipt');
@@ -4962,7 +5007,7 @@ function rcRender(){
       <td><span class="rc-pill ${cls}">${lbl}</span></td>
       <td class="mono">${r.rec ? escapeHtml(r.rec.no) : '—'}</td>
       <td>${r.rec ? escapeHtml(r.rec.date) : '—'}</td>
-      <td class="sup" dir="auto">${r.supplier ? escapeHtml(r.supplier) : (r.rec && r.rec.supCode ? 'كود ' + escapeHtml(r.rec.supCode) : '<span class="zero">غير معروف</span>')}</td>
+      <td class="sup" dir="auto">${r.supplier ? escapeHtml(r.supplier) : (r.rec && r.rec.supCode ? 'كود ' + escapeHtml(r.rec.supCode) : '<span class="zero">غير معروف</span>')}${r.cashWrong ? `<div style="font-size:11px;color:var(--brick);">متسجل في المخزن "مورد نقدي" (0)${r.realCode ? ' — كوده الصح ' + escapeHtml(r.realCode) : ''}</div>` : ''}</td>
       <td class="n">${r.rec ? apFmt(r.rec.total) : '—'}</td>
       <td class="mono" style="font-size:12px;">${invTxt}</td>
       <td class="n">${invSum === null ? '—' : apFmt(invSum)}</td>
@@ -4976,6 +5021,7 @@ function rcRender(){
       <div class="ap-kpi ${recNoInv.length ? 'bad' : ''}"><div class="lbl">استلام مالوش فاتورة</div><div class="val">${recNoInv.length}</div><div class="sub">${apFmt(sum(recNoInv, r=> r.rec.total))}</div></div>
       <div class="ap-kpi ${invNoRec.length ? 'bad' : ''}"><div class="lbl">فاتورة مالهاش استلام</div><div class="val">${invNoRec.length}</div><div class="sub">${apFmt(sum(invNoRec, r=> invSub(r.invs[0])))} قبل الضريبة</div></div>
       <div class="ap-kpi ${diffs.length ? 'bad' : ''}"><div class="lbl">فرق مبلغ</div><div class="val">${diffs.length}</div><div class="sub">صافي الفرق ${apFmt(sum(diffs, r=> r.diff))}</div></div>
+      <div class="ap-kpi ${cashWrong.length ? 'bad' : ''}"><div class="lbl">متسجل نقدي وهو آجل</div><div class="val">${cashWrong.length}</div><div class="sub">${apFmt(sum(cashWrong, r=> r.rec.total))} — كود المورد غلط في المخزن</div></div>
     </div>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;line-height:1.8;">
       ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && cnt('approx') && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${cnt('approx')})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}
@@ -4997,10 +5043,14 @@ function rcExport(){
   const rows = rc.results.map(r=> ({
     'الحالة': RC_LABEL[r.status][0].replace(/^[✓≈⚠؟✗]\s*/,''), 'رقم السند': r.rec ? r.rec.no : '', 'تاريخ الاستلام': r.rec ? r.rec.date : '', 'كود المورد في المخزن': r.rec ? r.rec.supCode : '',
     'المورد': r.supplier || '', 'إجمالي الاستلام': r.rec ? r.rec.total : '', 'رقم الفاتورة': r.invs.map(i=> i.invoiceNumber||'').join(' + '), 'تاريخ الفاتورة': r.invs.map(i=> i.date||'').join(' + '),
+    'ملاحظة المورد': r.cashWrong ? ('متسجل مورد نقدي (0) والصح ' + r.supplier + (r.realCode ? ' كود ' + r.realCode : '')) : (r.rec && r.rec.cash && !r.invs.length ? 'مورد نقدي — مش لاقي فاتورته' : ''),
     'إجمالي الفاتورة قبل الضريبة': r.invs.length ? Math.round(r.invs.reduce((t,i)=> t + invSub(i), 0)*100)/100 : '', 'الفرق': r.diff === null || r.diff === undefined ? '' : r.diff, 'طريقة الربط': r.by === 'number' ? 'برقم السند' : (r.by === 'approx' ? 'بالمبلغ والتاريخ' : '')
   }));
-  const ws = XLSX.utils.json_to_sheet(rows); ws['!views'] = [{ RTL: true }]; ws['!cols'] = [{wch:26},{wch:10},{wch:12},{wch:10},{wch:40},{wch:14},{wch:20},{wch:14},{wch:16},{wch:12},{wch:16}];
+  const ws = XLSX.utils.json_to_sheet(rows); ws['!views'] = [{ RTL: true }]; ws['!cols'] = [{wch:26},{wch:10},{wch:12},{wch:10},{wch:40},{wch:14},{wch:20},{wch:14},{wch:34},{wch:16},{wch:12},{wch:16}];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'مطابقة الاستلامات');
+  // شيت لقسم المخازن: السندات اللي كود المورد فيها غلط
+  const cw = rc.results.filter(r=> r.cashWrong).map(r=> ({ 'رقم السند': r.rec.no, 'التاريخ': r.rec.date, 'المسجل في المخزن': 'مورد نقدي (0)', 'المورد الصح': r.supplier, 'كود المورد الصح': r.realCode || '', 'رقم الفاتورة': r.invs.map(i=> i.invoiceNumber||'').join(' + '), 'الإجمالي قبل الضريبة': r.rec.total }));
+  if(cw.length){ const w2 = XLSX.utils.json_to_sheet(cw); w2['!views'] = [{ RTL: true }]; w2['!cols'] = [{wch:10},{wch:12},{wch:16},{wch:40},{wch:14},{wch:18},{wch:16}]; XLSX.utils.book_append_sheet(wb, w2, 'تصحيح كود المورد'); }
   XLSX.writeFile(wb, `مطابقة-الاستلامات-${(rc.recs.map(r=> r.date).sort()[0]||'').slice(0,7)}.xlsx`);
 }
 async function rcLink(list){
@@ -5013,13 +5063,27 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
   st.innerHTML = `<div class="status-line"><div class="spinner"></div> جاري قراءة الملف...</div>`;
   try{
     const wb = XLSX.read(await f.arrayBuffer(), { type:'array', cellDates:true });
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:'' });
-    const recs = parseReceiptsSheet(rows);
-    if(!recs.length) throw new Error('مفيش سندات استلام في الملف');
+    let recs = null, firstErr = null;
+    for(const sn of wb.SheetNames){
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header:1, raw:true, defval:'' });
+      recs = parseReceiptsFlat(rows);
+      if(recs && recs.length) break;
+      try{ recs = parseReceiptsSheet(rows); if(recs.length) break; }catch(e2){ firstErr = firstErr || e2; recs = null; }
+    }
+    if(!recs || !recs.length) throw (firstErr || new Error('مفيش سندات استلام في الملف'));
+    // لو الملف أطول من الفواتير اللي في البرنامج، نطابق الفترة اللي فيها فواتير بس
+    const allN = recs.length;
+    const invDates = invoices.map(i=> i.date).filter(Boolean).sort();
+    let trimNote = '';
+    if(invDates.length){
+      const months = new Set(invDates.map(d=> d.slice(0,7)));
+      const kept = recs.filter(r=> !r.date || months.has(r.date.slice(0,7)));
+      if(kept.length && kept.length < allN){ trimNote = ` — الملف فيه ${allN} سند، واتطابق منهم ${kept.length} في الشهور اللي فيها فواتير في البرنامج (${[...months].sort().join('، ')})`; recs = kept; }
+    }
     rc.recs = recs; rc.fileName = f.name; rc.open = new Set(); rc.filter = 'problems';
     rc.results = matchReceipts(recs);
     const d = recs.map(r=> r.date).sort();
-    st.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}</div>`;
+    st.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}${trimNote}</div>`;
     rcRender();
   }catch(err){ console.error(err); st.innerHTML = `<div class="error-box">تعذّر قراءة الملف: ${escapeHtml(err.message || String(err))}</div>`; }
   e.target.value = '';
