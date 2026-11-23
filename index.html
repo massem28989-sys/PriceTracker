@@ -4917,6 +4917,9 @@ function parseReceiptsSheet(rows){
 const rc = { recs: [], results: [], filter: 'problems', open: new Set(), fileName: '' };
 function invSub(inv){ return Math.round((inv.items||[]).reduce((t,it)=> t + (Number(it.price)||0), 0) * 100) / 100; }
 function rcDays(a, b){ return Math.round((new Date(a+'T00:00:00') - new Date(b+'T00:00:00')) / 86400000); }
+// أزواج (سند|فاتورة) اتفك ربطها يدوي — مايتقترحوش تاني
+function rcRejected(){ try{ return new Set(JSON.parse(localStorage.getItem('rcRejected') || '[]')); }catch(_){ return new Set(); } }
+function rcReject(no, invId){ try{ const s = rcRejected(); s.add(no + '|' + invId); localStorage.setItem('rcRejected', JSON.stringify([...s])); }catch(_){} }
 function matchReceipts(recs){
   const nos = recs.map(r=> Number(r.no)).filter(n=> !isNaN(n));
   const lo = Math.min(...nos), hi = Math.max(...nos);
@@ -4941,13 +4944,16 @@ function matchReceipts(recs){
   const codeName = (code)=>{ const m = codeVotes.get(code); if(!m) return ''; return [...m.entries()].sort((a,b)=> b[1]-a[1])[0][0]; };
   // 2) بالمبلغ والتاريخ (تقريبي) — للفواتير اللي مالهاش رقم سند
   const free = invoices.filter(i=> !used.has(i.id) && !receiptNos(i.receiptNumber).length && i.date && i.date >= addDaysToDate(dFrom, -5) && i.date <= addDaysToDate(dTo, 5));
-  const cands = (rec)=> free.filter(i=> !used.has(i.id) && Math.abs(invSub(i) - rec.total) <= 1 && Math.abs(rcDays(rec.date, i.date)) <= 3 && (!codeName(rec.supCode) || i.store === codeName(rec.supCode)));
+  const rej = rcRejected();
+  const cands = (rec)=> free.filter(i=> !used.has(i.id) && !rej.has(rec.no + '|' + i.id) && Math.abs(invSub(i) - rec.total) <= 1 && Math.abs(rcDays(rec.date, i.date)) <= 3 && (!codeName(rec.supCode) || i.store === codeName(rec.supCode)));
   const later = [];
-  pending.forEach(rec=>{ const c = cands(rec); if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); } else later.push(rec); });
+  // سند من غير كود مورد (نقدي): المبلغ والتاريخ لوحدهم ممكن يتطابقوا صدفة ⇒ "ضعيف" ولازم مراجعة الأصناف قبل الربط
+  const weak = (rec)=> !rec.supCode;
+  pending.forEach(rec=>{ const c = cands(rec); if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); } else later.push(rec); });
   later.forEach(rec=>{
     let c = cands(rec);
     if(c.length > 1){ const same = c.filter(i=> i.date === rec.date); if(same.length === 1) c = same; }
-    if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); }
+    if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); }
     else if(c.length > 1) out.push({ rec, invs: [], options: c, by: '', status: 'ambiguous', diff: null });
     else out.push({ rec, invs: [], by: '', status: 'no_invoice', diff: null });
   });
@@ -4967,7 +4973,7 @@ function matchReceipts(recs){
         || ((recs.find(x=> x.supCode && x.supName && canonProductName(x.supName) === canonProductName(st)) || {}).supCode) || '';
       const sp = (typeof supplierPaymentMap !== 'undefined') ? supplierPaymentMap.get(st) : null;
       const credit = (sp && sp.type === 'credit') || r.invs.some(i=> i.paymentType === 'credit') || (!!realCode && !(sp && sp.type === 'cash'));
-      if(credit && !/نقد|cash/i.test(st)) { r.cashWrong = true; r.realCode = realCode; }
+      if(credit && !/نقد|cash/i.test(st)) { r.cashWrong = true; r.realCode = realCode; r.cashSure = r.by === 'number'; }
     }
   });
   return out.sort((a,b)=> ((a.rec && a.rec.date) || (a.invs[0] && a.invs[0].date) || '').localeCompare((b.rec && b.rec.date) || (b.invs[0] && b.invs[0].date) || '') || String(a.rec ? a.rec.no : '').localeCompare(String(b.rec ? b.rec.no : '')));
@@ -4996,18 +5002,20 @@ function rcRender(){
   const invNoRec = R.filter(r=> r.status === 'no_receipt');
   const diffs = R.filter(r=> r.status === 'diff');
   const line = (r)=>{
-    const [lbl, cls] = RC_LABEL[r.status];
+    let [lbl, cls] = RC_LABEL[r.status];
+    if(r.weak) lbl = '≈ نفس المبلغ والتاريخ بس — قارن الأصناف';
     const inv = r.invs[0];
     const invTxt = r.invs.length ? r.invs.map(i=> `${escapeHtml(i.invoiceNumber || 'بدون رقم')} · ${escapeHtml(i.date||'')}`).join('<br>') : (r.options ? `<span style="font-size:11px;">${r.options.map(i=> escapeHtml((i.invoiceNumber||'؟') + ' · ' + i.store)).join('<br>')}</span>` : '—');
     const invSum = r.invs.length ? r.invs.reduce((t,i)=> t + invSub(i), 0) : null;
     const key = (r.rec ? 'r' + r.rec.no : 'i' + (inv && inv.id));
     const open = rc.open.has(key);
-    const act = isOwner && r.status === 'approx' && !receiptColMissing ? `<button class="ap-link" data-rclink="${escapeHtml(key)}">اربط</button>` : '';
+    const act = !isOwner || receiptColMissing ? '' : r.status === 'approx' ? `<button class="ap-link" data-rclink="${escapeHtml(key)}">اربط</button>`
+      : (r.by === 'number' && r.rec) ? `<button class="ap-link" data-rcunlink="${escapeHtml(key)}" style="color:var(--brick);" title="الفاتورة دي مش بتاعة السند ده">فك الربط</button>` : '';
     return `<tr class="click" data-rckey="${escapeHtml(key)}">
       <td><span class="rc-pill ${cls}">${lbl}</span></td>
       <td class="mono">${r.rec ? escapeHtml(r.rec.no) : '—'}</td>
       <td>${r.rec ? escapeHtml(r.rec.date) : '—'}</td>
-      <td class="sup" dir="auto">${r.supplier ? escapeHtml(r.supplier) : (r.rec && r.rec.supCode ? 'كود ' + escapeHtml(r.rec.supCode) : '<span class="zero">غير معروف</span>')}${r.cashWrong ? `<div style="font-size:11px;color:var(--brick);">متسجل في المخزن "مورد نقدي" (0)${r.realCode ? ' — كوده الصح ' + escapeHtml(r.realCode) : ''}</div>` : ''}</td>
+      <td class="sup" dir="auto">${r.supplier ? escapeHtml(r.supplier) : (r.rec && r.rec.supCode ? 'كود ' + escapeHtml(r.rec.supCode) : '<span class="zero">غير معروف</span>')}${r.cashWrong ? `<div style="font-size:11px;color:var(--brick);">متسجل في المخزن "مورد نقدي" (0)${r.realCode ? ' — كوده الصح ' + escapeHtml(r.realCode) : ''}${r.cashSure ? '' : ' (محتمل — اتأكد من الأصناف)'}</div>` : ''}</td>
       <td class="n">${r.rec ? apFmt(r.rec.total) : '—'}</td>
       <td class="mono" style="font-size:12px;">${invTxt}</td>
       <td class="n">${invSum === null ? '—' : apFmt(invSum)}</td>
@@ -5024,7 +5032,7 @@ function rcRender(){
       <div class="ap-kpi ${cashWrong.length ? 'bad' : ''}"><div class="lbl">متسجل نقدي وهو آجل</div><div class="val">${cashWrong.length}</div><div class="sub">${apFmt(sum(cashWrong, r=> r.rec.total))} — كود المورد غلط في المخزن</div></div>
     </div>
     <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;line-height:1.8;">
-      ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && cnt('approx') && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${cnt('approx')})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}
+      ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && R.some(r=> r.status === 'approx' && !r.weak) && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${R.filter(r=> r.status === 'approx' && !r.weak).length})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}${R.some(r=> r.weak) ? ` · ${R.filter(r=> r.weak).length} سند "مورد نقدي" اتطابق بالمبلغ والتاريخ بس — مش بيتربط مع الكل، افتح كل واحد وقارن الأصناف واربطه لوحده` : ''}
       · المبالغ قبل الضريبة · اضغط على أي صف تشوف الأصناف
     </div>
     <div class="ix-filters" style="padding:0 0 8px;border:none;">${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
@@ -5089,10 +5097,17 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
   e.target.value = '';
 });
 document.getElementById('rcResult').addEventListener('click', async (e)=>{
-  const t = e.target.closest('[data-rcfilter],[data-rclink],[data-rclinkall],#rcExport,[data-rckey]'); if(!t) return;
+  const t = e.target.closest('[data-rcfilter],[data-rclink],[data-rcunlink],[data-rclinkall],#rcExport,[data-rckey]'); if(!t) return;
+  if(t.dataset.rcunlink){
+    e.stopPropagation(); t.disabled = true;
+    const r = rc.results.find(x=> 'r' + (x.rec && x.rec.no) === t.dataset.rcunlink);
+    if(r) for(const inv of r.invs){ const rest = receiptNos(inv.receiptNumber).filter(n=> n !== r.rec.no); await saveReceiptNumber(inv.id, rest.join('، ')); rcReject(r.rec.no, inv.id); }
+    rc.results = matchReceipts(rc.recs);
+    return rcRender();
+  }
   if(t.dataset.rcfilter){ rc.filter = t.dataset.rcfilter; return rcRender(); }
   if(t.id === 'rcExport') return rcExport();
-  if(t.dataset.rclinkall){ t.disabled = true; t.textContent = 'جاري الربط...'; return rcLink(rc.results.filter(r=> r.status === 'approx')); }
+  if(t.dataset.rclinkall){ t.disabled = true; t.textContent = 'جاري الربط...'; return rcLink(rc.results.filter(r=> r.status === 'approx' && !r.weak)); }
   if(t.dataset.rclink){ e.stopPropagation(); t.disabled = true; return rcLink(rc.results.filter(r=> 'r' + (r.rec && r.rec.no) === t.dataset.rclink)); }
   if(t.dataset.rckey){ const k = t.dataset.rckey; rc.open.has(k) ? rc.open.delete(k) : rc.open.add(k); rcRender(); }
 });
