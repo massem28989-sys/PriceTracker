@@ -1478,6 +1478,7 @@ async function refreshInvoicesFromServer(){
     }))
   }));
   if(typeof loadReceiptNumbers === 'function') await loadReceiptNumbers();
+  if(typeof itemLinksLoad === 'function') await itemLinksLoad();
   if(typeof siLoad === 'function') await siLoad();
   if(typeof packsLoad === 'function') await packsLoad();
 }
@@ -4917,6 +4918,54 @@ function parseReceiptsSheet(rows){
 const rc = { recs: [], results: [], filter: 'problems', open: new Set(), fileName: '' };
 function invSub(inv){ return Math.round((inv.items||[]).reduce((t,it)=> t + (Number(it.price)||0), 0) * 100) / 100; }
 function rcDays(a, b){ return Math.round((new Date(a+'T00:00:00') - new Date(b+'T00:00:00')) / 86400000); }
+// ---------- ربط كود صنف المخزن باسم الصنف في الفاتورة ----------
+let itemLinks = new Map();   // كود المخزن -> Set(اسم الفاتورة بعد التوحيد)
+let itemLinksMissing = false;
+const ilKey = (n)=> canonProductName(n);
+async function itemLinksLoad(){
+  itemLinks = new Map(); itemLinksMissing = false;
+  if(!currentWorkspace) return;
+  const { data, error } = await sb.from('item_links').select('wh_code, inv_name').eq('workspace_id', currentWorkspace.id);
+  if(error){ itemLinksMissing = /relation|does not exist|schema cache|Could not find/i.test(error.message||''); if(!itemLinksMissing) console.error(error); return; }
+  (data||[]).forEach(r=> ilAddLocal(r.wh_code, r.inv_name));
+}
+function ilAddLocal(code, name){ const k = ilKey(name); if(!code || !k) return false; let s = itemLinks.get(String(code)); if(!s){ s = new Set(); itemLinks.set(String(code), s); } if(s.has(k)) return false; s.add(k); return true; }
+function ilNameKnown(name){ const k = ilKey(name); for(const s of itemLinks.values()) if(s.has(k)) return true; return false; }
+// نقابل سطور السند بسطور الفاتورة: نفس الإجمالي (±0.5)، ولو فيه أكتر من واحد نفس الكمية كمان
+function rcPairLines(rec, inv){
+  const used = new Set(); const pairs = [];
+  rec.items.forEach(it=>{
+    let c = (inv.items||[]).map((x,i)=> [x,i]).filter(([x,i])=> !used.has(i) && Math.abs((Number(x.price)||0) - it.total) <= 0.5);
+    if(c.length > 1) c = c.filter(([x])=> Math.abs((Number(x.qty)||0) - it.qty) < 0.001);
+    if(c.length === 1){ used.add(c[0][1]); pairs.push({ rec: it, inv: c[0][0] }); }
+  });
+  return pairs;
+}
+// حكم الأصناف: match = صنف مربوط موجود في الفاتورة، conflict = الطرفين معروفين ومفيش ولا صنف متقابل
+function rcLinkVerdict(rec, inv){
+  let known = 0, hit = 0;
+  const names = new Set((inv.items||[]).map(x=> ilKey(x.name)));
+  rec.items.forEach(it=>{ const s = itemLinks.get(String(it.code)); if(!s) return; known++; if([...s].some(n=> names.has(n))) hit++; });
+  if(hit) return 'match';
+  if(known && (inv.items||[]).some(x=> ilNameKnown(x.name))) return 'conflict';
+  return 'unknown';
+}
+// بنتعلّم الروابط من السندات المربوطة بالرقم أو اللي اتربطت يدوي
+async function rcLearn(rows){
+  if(!(currentWorkspace && currentWorkspace.role === 'owner')) return 0;
+  const add = [];
+  rows.forEach(r=>{ if(!r.rec || !r.invs.length) return; r.invs.forEach(inv=> rcPairLines(r.rec, inv).forEach(p=>{ if(p.rec.code && ilAddLocal(p.rec.code, p.inv.name)) add.push({ workspace_id: currentWorkspace.id, wh_code: String(p.rec.code), inv_name: ilKey(p.inv.name), wh_name: p.rec.name || '' }); })); });
+  if(add.length && !itemLinksMissing){
+    for(let i = 0; i < add.length; i += 200){ const { error } = await sb.from('item_links').upsert(add.slice(i, i+200)); if(error){ if(/relation|does not exist|schema cache|Could not find/i.test(error.message||'')) itemLinksMissing = true; else console.error(error); break; } }
+  }
+  return add.length;
+}
+async function rcUnlearn(rec, inv){
+  for(const p of rcPairLines(rec, inv)){
+    const s = itemLinks.get(String(p.rec.code)); if(s) s.delete(ilKey(p.inv.name));
+    if(!itemLinksMissing && currentWorkspace) await sb.from('item_links').delete().eq('workspace_id', currentWorkspace.id).eq('wh_code', String(p.rec.code)).eq('inv_name', ilKey(p.inv.name));
+  }
+}
 // أزواج (سند|فاتورة) اتفك ربطها يدوي — مايتقترحوش تاني
 function rcRejected(){ try{ return new Set(JSON.parse(localStorage.getItem('rcRejected') || '[]')); }catch(_){ return new Set(); } }
 function rcReject(no, invId){ try{ const s = rcRejected(); s.add(no + '|' + invId); localStorage.setItem('rcRejected', JSON.stringify([...s])); }catch(_){} }
@@ -4937,7 +4986,8 @@ function matchReceipts(recs){
       invs.forEach(i=> used.add(i.id));
       const sub = Math.round(invs.reduce((t,i)=> t + invSub(i), 0) * 100) / 100;
       const diff = Math.round((sub - rec.total) * 100) / 100;
-      out.push({ rec, invs, by: 'number', status: Math.abs(diff) <= 1 ? 'ok' : 'diff', diff });
+      const v = invs.some(i=> rcLinkVerdict(rec, i) === 'match') ? 'match' : (invs.every(i=> rcLinkVerdict(rec, i) === 'conflict') ? 'conflict' : 'unknown');
+      out.push({ rec, invs, by: 'number', status: Math.abs(diff) <= 1 ? 'ok' : 'diff', diff, items: v });
       vote(rec.supCode, invs[0].store);
     } else pending.push(rec);
   });
@@ -4945,15 +4995,17 @@ function matchReceipts(recs){
   // 2) بالمبلغ والتاريخ (تقريبي) — للفواتير اللي مالهاش رقم سند
   const free = invoices.filter(i=> !used.has(i.id) && !receiptNos(i.receiptNumber).length && i.date && i.date >= addDaysToDate(dFrom, -5) && i.date <= addDaysToDate(dTo, 5));
   const rej = rcRejected();
-  const cands = (rec)=> free.filter(i=> !used.has(i.id) && !rej.has(rec.no + '|' + i.id) && Math.abs(invSub(i) - rec.total) <= 1 && Math.abs(rcDays(rec.date, i.date)) <= 3 && (!codeName(rec.supCode) || i.store === codeName(rec.supCode)));
+  const cands0 = (rec)=> free.filter(i=> !used.has(i.id) && !rej.has(rec.no + '|' + i.id) && Math.abs(invSub(i) - rec.total) <= 1 && Math.abs(rcDays(rec.date, i.date)) <= 3 && (!codeName(rec.supCode) || i.store === codeName(rec.supCode)));
+  // الأصناف بتحسم: نشيل اللي أصنافه متعارضة، ولو فيه واحد أصنافه متطابقة ناخده
+  const cands = (rec)=>{ const c = cands0(rec).filter(i=> rcLinkVerdict(rec, i) !== 'conflict'); const m = c.filter(i=> rcLinkVerdict(rec, i) === 'match'); return m.length === 1 ? m : c; };
   const later = [];
   // سند من غير كود مورد (نقدي): المبلغ والتاريخ لوحدهم ممكن يتطابقوا صدفة ⇒ "ضعيف" ولازم مراجعة الأصناف قبل الربط
-  const weak = (rec)=> !rec.supCode;
-  pending.forEach(rec=>{ const c = cands(rec); if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); } else later.push(rec); });
+  const weak = (rec, inv)=> !rec.supCode && !(inv && rcLinkVerdict(rec, inv) === 'match');
+  pending.forEach(rec=>{ const c = cands(rec); if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec, c[0]), items: rcLinkVerdict(rec, c[0]), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); } else later.push(rec); });
   later.forEach(rec=>{
     let c = cands(rec);
     if(c.length > 1){ const same = c.filter(i=> i.date === rec.date); if(same.length === 1) c = same; }
-    if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); }
+    if(c.length === 1){ used.add(c[0].id); out.push({ rec, invs: c, by: 'approx', status: 'approx', weak: weak(rec, c[0]), items: rcLinkVerdict(rec, c[0]), diff: Math.round((invSub(c[0]) - rec.total)*100)/100 }); vote(rec.supCode, c[0].store); }
     else if(c.length > 1) out.push({ rec, invs: [], options: c, by: '', status: 'ambiguous', diff: null });
     else out.push({ rec, invs: [], by: '', status: 'no_invoice', diff: null });
   });
@@ -4973,7 +5025,7 @@ function matchReceipts(recs){
         || ((recs.find(x=> x.supCode && x.supName && canonProductName(x.supName) === canonProductName(st)) || {}).supCode) || '';
       const sp = (typeof supplierPaymentMap !== 'undefined') ? supplierPaymentMap.get(st) : null;
       const credit = (sp && sp.type === 'credit') || r.invs.some(i=> i.paymentType === 'credit') || (!!realCode && !(sp && sp.type === 'cash'));
-      if(credit && !/نقد|cash/i.test(st)) { r.cashWrong = true; r.realCode = realCode; r.cashSure = r.by === 'number'; }
+      if(credit && !/نقد|cash/i.test(st)) { r.cashWrong = true; r.realCode = realCode; r.cashSure = r.by === 'number' || r.items === 'match'; }
     }
   });
   return out.sort((a,b)=> ((a.rec && a.rec.date) || (a.invs[0] && a.invs[0].date) || '').localeCompare((b.rec && b.rec.date) || (b.invs[0] && b.invs[0].date) || '') || String(a.rec ? a.rec.no : '').localeCompare(String(b.rec ? b.rec.no : '')));
@@ -4993,7 +5045,7 @@ function rcRender(){
   const cnt = (s)=> R.filter(r=> r.status === s).length;
   const sum = (arr, f)=> arr.reduce((t,r)=> t + f(r), 0);
   const isOwner = currentWorkspace && currentWorkspace.role === 'owner';
-  const problems = R.filter(r=> ['diff','no_invoice','no_receipt','ambiguous','approx'].includes(r.status));
+  const problems = R.filter(r=> ['diff','no_invoice','no_receipt','ambiguous','approx'].includes(r.status) || r.items === 'conflict');
   const cashWrong = R.filter(r=> r.cashWrong);
   const filters = [['problems','محتاج مراجعة', problems.length],['cashwrong','نقدي وهو آجل', cashWrong.length],['ok','مطابق', cnt('ok')],['approx','تقريبي', cnt('approx')],['diff','فرق مبلغ', cnt('diff')],['no_invoice','استلام من غير فاتورة', cnt('no_invoice')],['no_receipt','فاتورة من غير استلام', cnt('no_receipt')],['ambiguous','محتمل', cnt('ambiguous')],['other_store','مخزن تاني', cnt('other_store')],['all','الكل', R.length]].filter(f=> f[0]==='all' || f[0]==='problems' || f[2]);
   const show = rc.filter === 'all' ? R : rc.filter === 'problems' ? problems : rc.filter === 'cashwrong' ? cashWrong : R.filter(r=> r.status === rc.filter);
@@ -5004,6 +5056,8 @@ function rcRender(){
   const line = (r)=>{
     let [lbl, cls] = RC_LABEL[r.status];
     if(r.weak) lbl = '≈ نفس المبلغ والتاريخ بس — قارن الأصناف';
+    else if(r.status === 'approx' && r.items === 'match') lbl = '≈ مطابق بالمبلغ والأصناف — اربطه';
+    if(r.items === 'conflict'){ lbl = '⚠ الأصناف مش زي بعض'; cls = 'err'; }
     const inv = r.invs[0];
     const invTxt = r.invs.length ? r.invs.map(i=> `${escapeHtml(i.invoiceNumber || 'بدون رقم')} · ${escapeHtml(i.date||'')}`).join('<br>') : (r.options ? `<span style="font-size:11px;">${r.options.map(i=> escapeHtml((i.invoiceNumber||'؟') + ' · ' + i.store)).join('<br>')}</span>` : '—');
     const invSum = r.invs.length ? r.invs.reduce((t,i)=> t + invSub(i), 0) : null;
@@ -5042,10 +5096,18 @@ function rcRender(){
       <tbody>${show.length ? show.map(line).join('') : `<tr><td colspan="9"><div class="ap-empty">مفيش حاجة هنا 👍</div></td></tr>`}</tbody>
     </table></div>`;
 }
+function rcPairNote(r){
+  if(!r.rec || !r.invs.length) return '';
+  const pairs = r.invs.flatMap(inv=> rcPairLines(r.rec, inv));
+  const known = r.rec.items.filter(it=> itemLinks.has(String(it.code)));
+  const lines = pairs.map(p=>{ const s = itemLinks.get(String(p.rec.code)); const st = s ? (s.has(ilKey(p.inv.name)) ? '✓' : '⚠ مربوط بصنف تاني') : 'جديد';
+    return `<div style="font-size:12px;" dir="auto"><span class="mono">${escapeHtml(p.rec.code)}</span> ${escapeHtml(p.rec.name)} ⟷ ${escapeHtml(p.inv.name)} <span style="color:${st==='✓'?'var(--pine-deep)':st==='جديد'?'var(--ink-soft)':'var(--brick)'};">${st}</span></div>`; }).join('');
+  return `<div style="margin-top:8px;padding:8px 10px;border:1px dashed var(--line);border-radius:5px;"><b style="font-size:12px;">ربط الأصناف (كود المخزن ⟷ اسم الفاتورة)</b>${lines || '<div style="font-size:12px;color:var(--ink-soft);">مفيش سطور متقابلة بالمبلغ</div>'}${known.length ? '' : '<div style="font-size:11px;color:var(--ink-soft);">لما تربط السند ده، الأصناف دي هتتحفظ ومن بعدها المطابقة هتبقى بالأصناف.</div>'}</div>`;
+}
 function rcDetail(r){
   const recT = r.rec ? `<table class="rc-sub"><thead><tr><th colspan="4">سند الاستلام ${escapeHtml(r.rec.no)}</th></tr><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${r.rec.items.map(it=> `<tr><td dir="auto">${escapeHtml(it.name)}</td><td class="n">${it.qty} ${escapeHtml(it.unit)}</td><td class="n">${fmtPrice(it.price)}</td><td class="n">${apFmt(it.total)}</td></tr>`).join('')}</tbody></table>` : '<div class="ap-empty">مفيش سند في ملف المخزن</div>';
   const invT = r.invs.length ? r.invs.map(inv=> `<table class="rc-sub"><thead><tr><th colspan="4">فاتورة ${escapeHtml(inv.invoiceNumber||'')} · ${escapeHtml(inv.store)}${inv.receiptNumber ? ' · سند ' + escapeHtml(inv.receiptNumber) : ''}</th></tr><tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${(inv.items||[]).map(it=> `<tr><td dir="auto">${escapeHtml(it.name)}</td><td class="n">${it.qty} ${escapeHtml(it.unit||'')}</td><td class="n">${fmtPrice((Number(it.price)||0)/(Number(it.qty)||1))}</td><td class="n">${apFmt(it.price)}</td></tr>`).join('')}</tbody></table>`).join('') : '<div class="ap-empty">مفيش فاتورة متسجلة</div>';
-  return `<div class="rc-detail-grid"><div>${recT}</div><div>${invT}</div></div>`;
+  return `<div class="rc-detail-grid"><div>${recT}</div><div>${invT}</div></div>${rcPairNote(r)}`;
 }
 function rcExport(){
   const rows = rc.results.map(r=> ({
@@ -5063,6 +5125,7 @@ function rcExport(){
 }
 async function rcLink(list){
   for(const r of list){ if(r.rec && r.invs[0]){ const cur = r.invs[0].receiptNumber; const val = cur ? cur + '، ' + r.rec.no : r.rec.no; await saveReceiptNumber(r.invs[0].id, val); } }
+  await rcLearn(list);
   rc.results = matchReceipts(rc.recs); rcRender();
 }
 document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
@@ -5090,8 +5153,10 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
     }
     rc.recs = recs; rc.fileName = f.name; rc.open = new Set(); rc.filter = 'problems';
     rc.results = matchReceipts(recs);
+    const learned = await rcLearn(rc.results.filter(r=> r.by === 'number' && r.status === 'ok' && r.items !== 'conflict'));
+    if(learned) rc.results = matchReceipts(recs);
     const d = recs.map(r=> r.date).sort();
-    st.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}${trimNote}</div>`;
+    st.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}${trimNote}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">أصناف مربوطة (كود المخزن ⟷ اسم الفاتورة): <b>${[...itemLinks.values()].reduce((t,s)=> t + s.size, 0)}</b>${learned ? ` — اتعلّم ${learned} ربط جديد من السندات المربوطة بالرقم` : ''}${itemLinksMissing ? ' — <span style="color:var(--brick);">الربط مش بيتحفظ: شغّل ملف supabase-schema-v24-item-links.sql</span>' : ''}</div>`;
     rcRender();
   }catch(err){ console.error(err); st.innerHTML = `<div class="error-box">تعذّر قراءة الملف: ${escapeHtml(err.message || String(err))}</div>`; }
   e.target.value = '';
@@ -5101,7 +5166,7 @@ document.getElementById('rcResult').addEventListener('click', async (e)=>{
   if(t.dataset.rcunlink){
     e.stopPropagation(); t.disabled = true;
     const r = rc.results.find(x=> 'r' + (x.rec && x.rec.no) === t.dataset.rcunlink);
-    if(r) for(const inv of r.invs){ const rest = receiptNos(inv.receiptNumber).filter(n=> n !== r.rec.no); await saveReceiptNumber(inv.id, rest.join('، ')); rcReject(r.rec.no, inv.id); }
+    if(r) for(const inv of r.invs){ const rest = receiptNos(inv.receiptNumber).filter(n=> n !== r.rec.no); await saveReceiptNumber(inv.id, rest.join('، ')); rcReject(r.rec.no, inv.id); await rcUnlearn(r.rec, inv); }
     rc.results = matchReceipts(rc.recs);
     return rcRender();
   }
