@@ -1357,13 +1357,13 @@ async function saveSettings(){
 async function loadCategories(){
   categoriesMap = new Map();
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('product_categories').select('product_name, category').eq('workspace_id', currentWorkspace.id);
+  const { data, error } = await sbAll(()=> sb.from('product_categories').select('product_name, category').eq('workspace_id', currentWorkspace.id).order('product_name'));
   if(!error) (data||[]).forEach(r => categoriesMap.set(canonStoredKey(r.product_name), r.category));
 }
 async function loadUnitConversions(){
   unitConversionsMap = new Map();
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('unit_conversions').select('product_key, unit, factor').eq('workspace_id', currentWorkspace.id);
+  const { data, error } = await sbAll(()=> sb.from('unit_conversions').select('product_key, unit, factor').eq('workspace_id', currentWorkspace.id).order('product_key').order('unit'));
   if(error) return;
   (data||[]).forEach(r=>{
     const ck = canonStoredKey(r.product_key);
@@ -1384,7 +1384,7 @@ async function saveCategoryBulk(keys, category){
 async function loadDestinations(){
   destinationsMap = new Map();
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('product_destinations').select('product_name, destination').eq('workspace_id', currentWorkspace.id);
+  const { data, error } = await sbAll(()=> sb.from('product_destinations').select('product_name, destination').eq('workspace_id', currentWorkspace.id).order('product_name'));
   if(!error) (data||[]).forEach(r => destinationsMap.set(canonStoredKey(r.product_name), r.destination));
 }
 async function saveDestination(productName, destination){
@@ -1459,13 +1459,24 @@ function effectiveDestinationForItem(it, storeName){
   return '';
 }
 
+// Supabase بيرجّع 1000 صف بالكتير في الطلب الواحد — بنجيب الباقي صفحة صفحة
+async function sbAll(make, page = 1000){
+  let all = [];
+  for(let from = 0; ; from += page){
+    const { data, error } = await make().range(from, from + page - 1);
+    if(error) return { data: all.length ? all : null, error };
+    all = all.concat(data || []);
+    if(!data || data.length < page) return { data: all, error: null };
+  }
+}
 async function refreshInvoicesFromServer(){
   if(!currentWorkspace){ invoices = []; return; }
-  const { data, error } = await sb
+  const { data, error } = await sbAll(()=> sb
     .from('invoices')
     .select('id, store, invoice_date, vat_rate, invoice_number, payment_type, invoice_items(id, name, barcode, price, qty, unit, destination)')
     .eq('workspace_id', currentWorkspace.id)
-    .order('invoice_date', { ascending: true });
+    .order('invoice_date', { ascending: true })
+    .order('id', { ascending: true }));
   if(error){ console.error(error); invoices = []; return; }
   invoices = (data || []).map(r => ({
     id: r.id,
@@ -4821,7 +4832,7 @@ let receiptColMissing = false;
 function receiptNos(s){ return String(s||'').split(/[^0-9]+/).map(x=> x.replace(/^0+/,'')).filter(x=> x.length >= 3); }
 async function loadReceiptNumbers(){
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('invoices').select('id, receipt_number').eq('workspace_id', currentWorkspace.id);
+  const { data, error } = await sbAll(()=> sb.from('invoices').select('id, receipt_number').eq('workspace_id', currentWorkspace.id).order('id'));
   if(error){ receiptColMissing = /receipt_number|column|schema cache/i.test(error.message||''); if(!receiptColMissing) console.error(error); return; }
   receiptColMissing = false;
   const m = new Map((data||[]).map(r=> [r.id, r.receipt_number || '']));
@@ -4926,7 +4937,7 @@ const ilKey = (n)=> canonProductName(n);
 async function itemLinksLoad(){
   itemLinks = new Map(); itemLinksMissing = false;
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('item_links').select('wh_code, inv_name').eq('workspace_id', currentWorkspace.id);
+  const { data, error } = await sbAll(()=> sb.from('item_links').select('wh_code, inv_name').eq('workspace_id', currentWorkspace.id).order('wh_code').order('inv_name'));
   if(error){ itemLinksMissing = /relation|does not exist|schema cache|Could not find/i.test(error.message||''); if(!itemLinksMissing) console.error(error); return; }
   (data||[]).forEach(r=> ilAddLocal(r.wh_code, r.inv_name));
 }
@@ -5278,7 +5289,7 @@ const PACK_BASES = ['كيلو','لتر','جالون','حبة'];
 async function packsLoad(){
   packsMap = new Map(); packsMissing = false;
   if(!currentWorkspace) return;
-  const { data, error } = await sb.from('product_packs').select('product_key, amount, base_unit').eq('workspace_id', currentWorkspace.id);
+  const { data, error } = await sbAll(()=> sb.from('product_packs').select('product_key, amount, base_unit').eq('workspace_id', currentWorkspace.id).order('product_key'));
   if(error){ packsMissing = /relation|does not exist|schema cache|Could not find/i.test(error.message||''); if(!packsMissing) console.error(error); return; }
   (data||[]).forEach(r=> packsMap.set(canonStoredKey(r.product_key), { amount: Number(r.amount), base: r.base_unit }));
 }
