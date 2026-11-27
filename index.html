@@ -2477,6 +2477,7 @@ function addDaysToDate(dateStr, days){
 }
 
 function renderSettlement(){
+  if(typeof rcRestore === 'function') setTimeout(rcRestore, 0);
   populateSettlementSupplierSelect();
   const supplier = els.settlementSupplierSelect.value;
   const fromDate = els.settlementFromDate.value || '';
@@ -5230,7 +5231,10 @@ function rcRender(){
   const problems = R.filter(r=> ['diff','no_invoice','no_receipt','ambiguous','approx'].includes(r.status) || r.items === 'conflict');
   const cashWrong = R.filter(r=> r.cashWrong);
   const filters = [['problems','محتاج مراجعة', problems.length],['cashwrong','نقدي وهو آجل', cashWrong.length],['ok','مطابق', cnt('ok')],['approx','تقريبي', cnt('approx')],['diff','فرق مبلغ', cnt('diff')],['no_invoice','استلام من غير فاتورة', cnt('no_invoice')],['no_receipt','فاتورة من غير استلام', cnt('no_receipt')],['ambiguous','محتمل', cnt('ambiguous')],['other_store','مخزن تاني', cnt('other_store')],['all','الكل', R.length]].filter(f=> f[0]==='all' || f[0]==='problems' || f[2]);
-  const show = rc.filter === 'all' ? R : rc.filter === 'problems' ? problems : rc.filter === 'cashwrong' ? cashWrong : R.filter(r=> r.status === rc.filter);
+  const q = (rc.q || '').trim().toLowerCase();
+  const show0 = rc.filter === 'all' || q ? R : rc.filter === 'problems' ? problems : rc.filter === 'cashwrong' ? cashWrong : R.filter(r=> r.status === rc.filter);
+  // بحث برقم السند / رقم الفاتورة / المورد / الصنف / المبلغ
+  const show = !q ? show0 : show0.filter(r=> [r.rec && r.rec.no, r.supplier, r.rec && r.rec.total, ...(r.invs||[]).map(i=> i.invoiceNumber), ...((r.rec && r.rec.items)||[]).map(it=> it.name), ...(r.invs||[]).flatMap(i=> (i.items||[]).map(it=> it.name))].some(v=> v != null && String(v).toLowerCase().includes(q)));
   const recTotal = sum(R.filter(r=> r.rec), r=> r.rec.total);
   const recNoInv = R.filter(r=> r.status === 'no_invoice');
   const invNoRec = R.filter(r=> r.status === 'no_receipt');
@@ -5272,7 +5276,7 @@ function rcRender(){
       ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && R.some(r=> r.status === 'approx' && !r.weak) && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${R.filter(r=> r.status === 'approx' && !r.weak).length})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}${R.some(r=> r.weak) ? ` · ${R.filter(r=> r.weak).length} سند المبلغ بس اللي متطابق (الأصناف أو الكميات مش شبه بعض، أو مورد نقدي) — مش بيتربط مع الكل، افتح كل واحد وقارن واربطه لوحده لو صح` : ''}
       · المبالغ قبل الضريبة · اضغط على أي صف تشوف الأصناف
     </div>
-    <div class="ix-filters" style="padding:0 0 8px;border:none;">${monthSel}${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
+    <div class="ix-filters" style="padding:0 0 8px;border:none;"><input id="rcSearch" type="search" placeholder="ابحث: رقم سند، فاتورة، صنف، مبلغ" value="${escapeHtml(rc.q||'')}" style="padding:4px 10px;border:1px solid var(--line);border-radius:14px;font-family:inherit;font-size:12px;min-width:220px;">${monthSel}${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
       <button class="ap-btn" id="rcExport" style="margin-inline-start:auto;padding:4px 12px;font-size:12px;">تصدير Excel</button></div>
     <div class="ap-scroll"><table class="ap-table">
       <thead><tr><th>الحالة</th><th>رقم السند</th><th>تاريخ الاستلام</th><th>المورد</th><th class="n">إجمالي الاستلام</th><th>الفاتورة</th><th class="n">إجمالي الفاتورة</th><th class="n">الفرق</th><th></th></tr></thead>
@@ -5325,6 +5329,23 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
       try{ recs = parseReceiptsSheet(rows); if(recs.length) break; }catch(e2){ firstErr = firstErr || e2; recs = null; }
     }
     if(!recs || !recs.length) throw (firstErr || new Error('مفيش سندات استلام في الملف'));
+    // نفتكر آخر ملف على الجهاز ده عشان مايترفعش كل مرة
+    try{ localStorage.setItem('rcLastFile', JSON.stringify({ name: f.name, at: new Date().toISOString(), recs })); }catch(_){}
+    await rcProcess(recs, f.name, '');
+    e.target.value = '';
+  }catch(err){ console.error(err); st.innerHTML = `<div class="error-box">تعذّر قراءة الملف: ${escapeHtml(err.message || String(err))}</div>`; }
+});
+let rcRestoring = false;
+async function rcRestore(){
+  if(rcRestoring || (rc.results && rc.results.length) || !invoices.length) return;
+  let saved = null; try{ saved = JSON.parse(localStorage.getItem('rcLastFile') || 'null'); }catch(_){}
+  if(!saved || !Array.isArray(saved.recs) || !saved.recs.length) return;
+  rcRestoring = true;
+  try{ await rcProcess(saved.recs, saved.name, saved.at); }catch(e){ console.error(e); } finally{ rcRestoring = false; }
+}
+async function rcProcess(recs, fileName, savedAt){
+  const st = document.getElementById('rcStatus');
+  {
     rc.allRecs = recs.slice();
     // لو الملف أطول من الفواتير اللي في البرنامج، نطابق الفترة اللي فيها فواتير بس
     const allN = recs.length;
@@ -5343,17 +5364,18 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
         recs = kept;
       }
     }
-    rc.recs = recs; rc.fileName = f.name; rc.open = new Set(); rc.filter = 'problems';
+    rc.recs = recs; rc.fileName = fileName; rc.open = new Set(); rc.filter = 'problems';
     rc.results = matchReceipts(recs);
     const learned = await rcLearn(rc.results.filter(r=> r.by === 'number' && r.status === 'ok' && r.items !== 'conflict'));
     if(learned) rc.results = matchReceipts(recs);
     const d = recs.map(r=> r.date).sort();
-    st.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}${trimNote}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">أصناف مربوطة (كود المخزن ⟷ اسم الفاتورة): <b>${[...itemLinks.values()].reduce((t,s)=> t + s.size, 0)}</b>${learned ? ` — اتعلّم ${learned} ربط جديد من السندات المربوطة بالرقم` : ''}${itemLinksMissing ? ' — <span style="color:var(--brick);">الربط مش بيتحفظ: شغّل ملف supabase-schema-v24-item-links.sql</span>' : ''}</div><div id="rcRenameBox">${rcRenameNote()}</div>`;
+    st.innerHTML = (savedAt ? `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:2px;">آخر ملف اترفع على الجهاز ده: <b dir="auto">${escapeHtml(fileName||'')}</b> (${escapeHtml(String(savedAt).slice(0,10))}) — لو عندك ملف أحدث ارفعه.</div>` : '') + `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}${trimNote}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">أصناف مربوطة (كود المخزن ⟷ اسم الفاتورة): <b>${[...itemLinks.values()].reduce((t,s)=> t + s.size, 0)}</b>${learned ? ` — اتعلّم ${learned} ربط جديد من السندات المربوطة بالرقم` : ''}${itemLinksMissing ? ' — <span style="color:var(--brick);">الربط مش بيتحفظ: شغّل ملف supabase-schema-v24-item-links.sql</span>' : ''}</div><div id="rcRenameBox">${rcRenameNote()}</div>`;
     rcRender();
-  }catch(err){ console.error(err); st.innerHTML = `<div class="error-box">تعذّر قراءة الملف: ${escapeHtml(err.message || String(err))}</div>`; }
-  e.target.value = '';
-});
+  }
+}
 document.getElementById('rcResult').addEventListener('change', (e)=>{ if(e.target.id === 'rcMonth'){ rc.month = e.target.value; rcRender(); } });
+let rcSearchT = null;
+document.getElementById('rcResult').addEventListener('input', (e)=>{ if(e.target.id !== 'rcSearch') return; rc.q = e.target.value; clearTimeout(rcSearchT); rcSearchT = setTimeout(()=>{ rcRender(); const i = document.getElementById('rcSearch'); if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); });
 document.getElementById('rcResult').addEventListener('click', async (e)=>{
   const t = e.target.closest('[data-rcfilter],[data-rclink],[data-rcunlink],[data-rclinkall],#rcExport,[data-rckey]'); if(!t) return;
   if(t.dataset.rcunlink){
