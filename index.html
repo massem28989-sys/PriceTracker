@@ -4981,7 +4981,7 @@ function rcFit(rec, inv){
 async function rcLearn(rows){
   if(!(currentWorkspace && currentWorkspace.role === 'owner')) return 0;
   const add = [];
-  rows.forEach(r=>{ if(!r.rec || !r.invs.length) return; r.invs.forEach(inv=> rcPairLines(r.rec, inv).forEach(p=>{ if(p.rec.code && ilAddLocal(p.rec.code, p.inv.name)) add.push({ workspace_id: currentWorkspace.id, wh_code: String(p.rec.code), inv_name: ilKey(p.inv.name), wh_name: p.rec.name || '' }); })); });
+  rows.forEach(r=>{ if(!r.rec || !r.invs.length) return; r.invs.forEach(inv=> rcPairLines(r.rec, inv).forEach(p=>{ if(p.rec.code && ilKey(p.inv.name) !== ilKey(p.rec.name) && ilAddLocal(p.rec.code, p.inv.name)) add.push({ workspace_id: currentWorkspace.id, wh_code: String(p.rec.code), inv_name: ilKey(p.inv.name), wh_name: p.rec.name || '' }); })); });
   if(add.length && !itemLinksMissing){
     for(let i = 0; i < add.length; i += 200){ const { error } = await sb.from('item_links').upsert(add.slice(i, i+200)); if(error){ if(/relation|does not exist|schema cache|Could not find/i.test(error.message||'')) itemLinksMissing = true; else console.error(error); break; } }
   }
@@ -4993,12 +4993,51 @@ async function rcUnlearn(rec, inv){
     if(!itemLinksMissing && currentWorkspace) await sb.from('item_links').delete().eq('workspace_id', currentWorkspace.id).eq('wh_code', String(p.rec.code)).eq('inv_name', ilKey(p.inv.name));
   }
 }
+// ---------- توحيد أسماء الأصناف: اللي متسجل باسم المخزن ⟵ اسمه في فواتير المورد ----------
+function rcRenamePlan(){
+  if(!rc.allRecs) return [];
+  const whCode = new Map(); // اسم المخزن (موحّد) -> كود
+  rc.allRecs.forEach(r=> r.items.forEach(it=> { if(it.name && it.code) whCode.set(ilKey(it.name), String(it.code)); }));
+  const plan = new Map(); // from name -> {to, ids:[]}
+  invoices.forEach(inv=> (inv.items||[]).forEach(it=>{
+    const code = whCode.get(ilKey(it.name)); if(!code || !itemLinks.has(code)) return;
+    const to = rcPrettyName(code, it.name); if(!to || ilKey(to) === ilKey(it.name)) return;
+    const k = it.name + '\u0000' + to; const o = plan.get(k) || { from: it.name, to, ids: [] }; if(it.id) o.ids.push(it.id); plan.set(k, o);
+  }));
+  return [...plan.values()].filter(o=> o.ids.length);
+}
+function rcRenameNote(){
+  const plan = rcRenamePlan(); if(!plan.length) return '';
+  const n = plan.reduce((t,o)=> t + o.ids.length, 0);
+  const isOwner = currentWorkspace && currentWorkspace.role === 'owner';
+  return `<div style="font-size:12px;margin-top:4px;background:var(--paper-raised);border:1px solid var(--line);border-radius:5px;padding:6px 10px;">
+    ${plan.length} صنف متسجل باسم المخزن ومعروف اسمه في فواتير المورد (${n} سطر) — عشان الصنف يبقى خط واحد في الأسعار شهر بشهر.
+    ${isOwner ? `<button class="ap-link" id="rcRenameGo">وحّد الأسماء</button> · <a href="#" id="rcRenameShow">وريني</a>` : ''}
+    <div id="rcRenameList" style="display:none;margin-top:4px;">${plan.slice(0,80).map(o=> `<div dir="auto">${escapeHtml(o.from)} ⟵ <b>${escapeHtml(o.to)}</b> (${o.ids.length})</div>`).join('')}</div></div>`;
+}
+document.addEventListener('click', async (e)=>{
+  if(e.target.id === 'rcRenameShow'){ e.preventDefault(); const l = document.getElementById('rcRenameList'); if(l) l.style.display = l.style.display === 'none' ? 'block' : 'none'; }
+  if(e.target.id === 'rcRenameGo'){
+    const btn = e.target; btn.disabled = true; btn.textContent = 'جاري التوحيد...';
+    let n = 0;
+    try{
+      for(const o of rcRenamePlan()){
+        for(let i = 0; i < o.ids.length; i += 100){ const r = await sb.from('invoice_items').update({ name: o.to }).in('id', o.ids.slice(i, i+100)); if(r.error) throw r.error; }
+        n += o.ids.length;
+      }
+      await refreshInvoicesFromServer(); renderAll();
+      const box = document.getElementById('rcRenameBox'); if(box) box.innerHTML = `<div style="font-size:12px;color:var(--pine-deep);margin-top:4px;">✓ اتوحّد اسم ${n} سطر.</div>` + rcRenameNote();
+    }catch(err){ console.error(err); alert('فشل التوحيد: ' + (err.message || err)); btn.disabled = false; btn.textContent = 'وحّد الأسماء'; }
+  }
+});
 // ---------- تسجيل سندات المخزن كفواتير (للشهور اللي فواتيرها مش مرفوعة) ----------
 function rcPrettyName(code, whName){
   const s = itemLinks.get(String(code)); if(!s || !s.size) return whName;
-  const keys = [...s];
-  for(const inv of invoices) for(const it of (inv.items||[])) if(keys.includes(ilKey(it.name))) return it.name;
-  return whName;
+  // اسم الفاتورة الحقيقي (مش اسم المخزن نفسه)، والأفضل من فاتورة ليها رقم
+  const keys = [...s].filter(k=> k !== ilKey(whName)); if(!keys.length) return whName;
+  let fallback = '';
+  for(const inv of invoices) for(const it of (inv.items||[])) if(keys.includes(ilKey(it.name))){ if(inv.invoiceNumber) return it.name; if(!fallback) fallback = it.name; }
+  return fallback || whName;
 }
 function rcImportPlan(months, includeCash){
   matchReceipts(rc.allRecs); const codeMap = rc.codeMap; // أسماء الموردين متعلّمة من كل الشهور
@@ -5259,7 +5298,7 @@ document.getElementById('rcFileInput').addEventListener('change', async (e)=>{
     const learned = await rcLearn(rc.results.filter(r=> r.by === 'number' && r.status === 'ok' && r.items !== 'conflict'));
     if(learned) rc.results = matchReceipts(recs);
     const d = recs.map(r=> r.date).sort();
-    st.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}${trimNote}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">أصناف مربوطة (كود المخزن ⟷ اسم الفاتورة): <b>${[...itemLinks.values()].reduce((t,s)=> t + s.size, 0)}</b>${learned ? ` — اتعلّم ${learned} ربط جديد من السندات المربوطة بالرقم` : ''}${itemLinksMissing ? ' — <span style="color:var(--brick);">الربط مش بيتحفظ: شغّل ملف supabase-schema-v24-item-links.sql</span>' : ''}</div>`;
+    st.innerHTML = `<div class="status-line" style="color:var(--pine-deep);">✓ اتقرا ${recs.length} سند استلام (${recs.reduce((t,r)=> t + r.items.length, 0)} سطر) من ${d[0]} إلى ${d[d.length-1]}${trimNote}</div><div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">أصناف مربوطة (كود المخزن ⟷ اسم الفاتورة): <b>${[...itemLinks.values()].reduce((t,s)=> t + s.size, 0)}</b>${learned ? ` — اتعلّم ${learned} ربط جديد من السندات المربوطة بالرقم` : ''}${itemLinksMissing ? ' — <span style="color:var(--brick);">الربط مش بيتحفظ: شغّل ملف supabase-schema-v24-item-links.sql</span>' : ''}</div><div id="rcRenameBox">${rcRenameNote()}</div>`;
     rcRender();
   }catch(err){ console.error(err); st.innerHTML = `<div class="error-box">تعذّر قراءة الملف: ${escapeHtml(err.message || String(err))}</div>`; }
   e.target.value = '';
