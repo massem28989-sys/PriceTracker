@@ -4716,7 +4716,8 @@ function dhChecks(){
   out.outliers = outliers.sort((a,b)=> Math.max(b.ratio, 1/b.ratio) - Math.max(a.ratio, 1/a.ratio));
 
   // 5) فواتير من غير رقم
-  out.noNumber = invoices.filter(inv=> !inv.invoiceNumber && !dh.dismissed.has('nonum:' + inv.id));
+  // الفواتير المتسجلة من سندات المخزن (ليها رقم سند) مش محتاجة رقم فاتورة عشان تتطابق — مش مشكلة
+  out.noNumber = invoices.filter(inv=> !inv.invoiceNumber && !inv.receiptNumber && !dh.dismissed.has('nonum:' + inv.id));
 
   // 6) فواتير فاضية أو إجماليها صفر
   out.empty = invoices.filter(inv=> !(inv.items||[]).length || dhInvTotal(inv) <= 0);
