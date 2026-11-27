@@ -5089,10 +5089,19 @@ function rcImportPlan(months, includeCash){
   matchReceipts(rc.allRecs); const codeMap = rc.codeMap; // أسماء الموردين متعلّمة من كل الشهور
   const taken = new Set(); invoices.forEach(i=> receiptNos(i.receiptNumber).forEach(n=> taken.add(n)));
   const res = matchReceipts(rc.allRecs.filter(r=> r.date && months.includes(r.date.slice(0,7)))); rc.codeMap = codeMap;
-  const recs = res.filter(r=> r.status === 'no_invoice' && r.rec && !taken.has(r.rec.no) && (includeCash || !r.rec.cash) && r.rec.items.length).map(r=> r.rec);
+  // أمان ضد التكرار: لو عند نفس المورد فاتورة مش مربوطة بسند في نفس الأيام (±5) يبقى غالبًا هي نفس الاستلام بمبلغ مختلف ⇒ نسيبه للمراجعة
+  const unlinked = res.filter(r=> r.status === 'no_receipt').flatMap(r=> r.invs);
+  const dd = (a,b)=> (a && b) ? Math.abs((new Date(a) - new Date(b)) / 86400000) : 99;
+  const held = [];
+  const recs = res.filter(r=> r.status === 'no_invoice' && r.rec && !taken.has(r.rec.no) && (includeCash || !r.rec.cash) && r.rec.items.length).map(r=> r.rec).filter(rec=>{
+    const sup = rec.supCode ? codeMap.get(rec.supCode) : '';
+    const near = sup ? unlinked.filter(i=> i.store === sup && dd(i.date, rec.date) <= 5) : [];
+    if(near.length){ held.push({ rec, near }); return false; }
+    return true;
+  });
   const sups = new Map(); // اسم المخزن -> {code, n, total, mapped}
   recs.forEach(r=>{ const k = r.cash ? 'مورد نقدي' : (r.supName || ('كود ' + r.supCode)); const o = sups.get(k) || { code: r.supCode, n: 0, total: 0, mapped: r.supCode ? (rc.codeMap.get(r.supCode) || '') : '' }; o.n++; o.total += r.total; sups.set(k, o); });
-  return { recs, sups, cash: res.filter(r=> r.status === 'no_invoice' && r.rec && r.rec.cash).length, skippedMatched: res.filter(r=> r.rec && r.status !== 'no_invoice').length };
+  return { recs, sups, held, cash: res.filter(r=> r.status === 'no_invoice' && r.rec && r.rec.cash).length, skippedMatched: res.filter(r=> r.rec && r.status !== 'no_invoice').length };
 }
 function rcImportOpen(months){
   const box = document.getElementById('rcImportBox'); if(!box) return;
@@ -5104,6 +5113,7 @@ function rcImportOpen(months){
     <b>تسجيل سندات ${months.join('، ')} كفواتير</b>
     <div style="font-size:13px;line-height:1.9;margin:4px 0 8px;">هيتسجل <b>${plan.recs.length}</b> فاتورة (${apFmt(plan.recs.reduce((t,r)=> t + r.total, 0))} قبل الضريبة)، كل واحدة برقم السند بتاعها، والأصناف بأساميها في الفواتير لو الصنف مربوط، وإلا باسمه في المخزن.
       ${plan.skippedMatched ? `<br>${plan.skippedMatched} سند ليهم فاتورة متسجلة أصلًا — مش هيتكرروا.` : ''}
+      ${plan.held.length ? `<br><span style="color:var(--brick);">${plan.held.length} سند اتسابوا للمراجعة</span> لأن عند نفس المورد فاتورة في نفس الأيام بمبلغ مختلف (ممكن تكون هي نفسها) — هتلاقيهم في المطابقة "استلام مالوش فاتورة" و"فاتورة مالهاش استلام".` : ''}
       <br><label><input type="checkbox" id="rcImpCash" ${includeCash ? 'checked' : ''}> سجّل كمان سندات "مورد نقدي" (${plan.cash}) تحت اسم "مورد نقدي"</label></div>
     <div class="ap-scroll" style="max-height:300px;"><table class="ap-table" style="min-width:0;"><thead><tr><th>المورد في المخزن</th><th class="n">سندات</th><th class="n">الإجمالي</th><th>يتسجل باسم</th></tr></thead><tbody>
       ${rows.map(([k,o])=> `<tr><td dir="auto">${escapeHtml(k)}${o.code ? ` <span class="mono" style="font-size:11px;color:var(--ink-soft);">${escapeHtml(o.code)}</span>` : ''}</td><td class="n">${o.n}</td><td class="n">${apFmt(o.total)}</td>
@@ -5133,8 +5143,9 @@ async function rcImportRun(){
     catch(e){ console.error(e); fail++; }
     if((ok + fail) % 10 === 0) st.textContent = `جاري التسجيل... ${ok + fail} / ${plan.recs.length}`;
   }
-  st.innerHTML = `✓ اتسجل ${ok} فاتورة${fail ? ` — فشل ${fail}` : ''}. ارفع ملف الاستلامات تاني عشان تتطابق.`;
   await refreshInvoicesFromServer(); renderAll();
+  if(rc.recs){ rc.results = matchReceipts(rc.recs); rcRender(); }
+  const st2 = document.getElementById('rcImpStatus') || st; st2.innerHTML = `✓ اتسجل ${ok} فاتورة${fail ? ` — فشل ${fail}` : ''}، والمطابقة اتحدّثت.`;
 }
 document.addEventListener('click', (e)=>{
   if(e.target.id === 'rcImportOpen'){ e.preventDefault(); rcImportOpen(e.target.dataset.months.split(',')); }
@@ -5232,6 +5243,7 @@ function rcRender(){
   const cashWrong = R.filter(r=> r.cashWrong);
   const filters = [['problems','محتاج مراجعة', problems.length],['cashwrong','نقدي وهو آجل', cashWrong.length],['ok','مطابق', cnt('ok')],['approx','تقريبي', cnt('approx')],['diff','فرق مبلغ', cnt('diff')],['no_invoice','استلام من غير فاتورة', cnt('no_invoice')],['no_receipt','فاتورة من غير استلام', cnt('no_receipt')],['ambiguous','محتمل', cnt('ambiguous')],['other_store','مخزن تاني', cnt('other_store')],['all','الكل', R.length]].filter(f=> f[0]==='all' || f[0]==='problems' || f[2]);
   const q = (rc.q || '').trim().toLowerCase();
+  const noInvMonths = [...new Set(R.filter(r=> r.status === 'no_invoice' && r.rec && r.rec.date).map(r=> r.rec.date.slice(0,7)))].sort();
   const show0 = rc.filter === 'all' || q ? R : rc.filter === 'problems' ? problems : rc.filter === 'cashwrong' ? cashWrong : R.filter(r=> r.status === rc.filter);
   // بحث برقم السند / رقم الفاتورة / المورد / الصنف / المبلغ
   const show = !q ? show0 : show0.filter(r=> [r.rec && r.rec.no, r.supplier, r.rec && r.rec.total, ...(r.invs||[]).map(i=> i.invoiceNumber), ...((r.rec && r.rec.items)||[]).map(it=> it.name), ...(r.invs||[]).flatMap(i=> (i.items||[]).map(it=> it.name))].some(v=> v != null && String(v).toLowerCase().includes(q)));
@@ -5276,7 +5288,7 @@ function rcRender(){
       ${cnt('ok')} مطابق بالرقم · ${cnt('approx')} مطابق بالمبلغ والتاريخ (تقريبي) — ${isOwner && R.some(r=> r.status === 'approx' && !r.weak) && !receiptColMissing ? `<button class="ap-link" data-rclinkall="1">اربط كل التقريبي (${R.filter(r=> r.status === 'approx' && !r.weak).length})</button> عشان المرة الجاية يبقى بالرقم` : 'اربطهم عشان المرة الجاية يبقوا بالرقم'}${R.some(r=> r.weak) ? ` · ${R.filter(r=> r.weak).length} سند المبلغ بس اللي متطابق (الأصناف أو الكميات مش شبه بعض، أو مورد نقدي) — مش بيتربط مع الكل، افتح كل واحد وقارن واربطه لوحده لو صح` : ''}
       · المبالغ قبل الضريبة · اضغط على أي صف تشوف الأصناف
     </div>
-    <div class="ix-filters" style="padding:0 0 8px;border:none;"><input id="rcSearch" type="search" placeholder="ابحث: رقم سند، فاتورة، صنف، مبلغ" value="${escapeHtml(rc.q||'')}" style="padding:4px 10px;border:1px solid var(--line);border-radius:14px;font-family:inherit;font-size:12px;min-width:220px;">${monthSel}${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
+    ${isOwner && noInvMonths.length && !receiptColMissing ? `<div style="font-size:12px;margin:0 0 8px;">مش لازم ترفع الفواتير الناقصة: <button class="ap-link" id="rcImportOpen" data-months="${noInvMonths.join(',')}">سجّل السندات اللي مالهاش فاتورة كفواتير (${R.filter(r=> r.status === 'no_invoice').length})</button> — بأسعار وكميات المخزن، ومن غير ما يتكرر حاجة متسجلة.</div>` : ''}<div class="ix-filters" style="padding:0 0 8px;border:none;"><input id="rcSearch" type="search" placeholder="ابحث: رقم سند، فاتورة، صنف، مبلغ" value="${escapeHtml(rc.q||'')}" style="padding:4px 10px;border:1px solid var(--line);border-radius:14px;font-family:inherit;font-size:12px;min-width:220px;">${monthSel}${filters.map(([k,l,n])=> `<button class="ix-filter ${rc.filter===k?'on':''}" data-rcfilter="${k}">${l} ${n}</button>`).join('')}
       <button class="ap-btn" id="rcExport" style="margin-inline-start:auto;padding:4px 12px;font-size:12px;">تصدير Excel</button></div>
     <div class="ap-scroll"><table class="ap-table">
       <thead><tr><th>الحالة</th><th>رقم السند</th><th>تاريخ الاستلام</th><th>المورد</th><th class="n">إجمالي الاستلام</th><th>الفاتورة</th><th class="n">إجمالي الفاتورة</th><th class="n">الفرق</th><th></th></tr></thead>
