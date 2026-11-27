@@ -1573,7 +1573,11 @@ function unitKey(u){
   const x = normName(u||'').toUpperCase().replace(/\.$/,'');
   if(/^(KG|KGS|KILO|KILOS|كيلو|كيلوجرام|كجم|كغ|ك)$/.test(x)) return 'KG';
   if(/^(L|LT|LTR|LTRS|LITRE|LITER|LITRES|LITERS|لتر)$/.test(x)) return 'L';
-  if(/^(PC|PCS|PIECE|PIECES|حبة|حبه|قطعة|قطعه)$/.test(x)) return 'PC';
+  if(/^(PC|PCS|PCE|PIC|PICS|PIECE|PIECES|NOS|NO|UNIT|UNITS|EA|EACH|حبة|حبه|قطعة|قطعه)$/.test(x)) return 'PC';
+  if(/^(CTN|CTNS|CARTON|CARTONS|CARTTON|CARTOON|CS|CASE|CASES|CAR|CRT|كرتونة|كرتونه|كرتون)$/.test(x)) return 'CTN';
+  if(/^(BG|BAG|BAGS|كيس|شوال|شيكارة|شيكاره)$/.test(x)) return 'BAG';
+  if(/^(PKT|PKTS|PK|PAC|PACK|PACKS|PACKET|PACKETS|باكو|باكيت)$/.test(x)) return 'PKT';
+  if(/^(BKT|BUCKET|BUCKETS|جردل)$/.test(x)) return 'BKT';
   return x;
 }
 function baseProductKey(it){
@@ -2103,7 +2107,7 @@ function findProductDuplicateGroups(){
   items.forEach((x,i)=>{ const r = find(i); if(!groups.has(r)) groups.set(r, []); groups.get(r).push(x); });
   const out = [...groups.values()].filter(g=> g.length > 1).map(g=> {
     const id = 'prod:' + g.map(x=> x.key).sort().join('||');
-    const units = new Set(g.flatMap(x=> x.e.points.map(p=> normName(p.unit||'').toUpperCase())));
+    const units = new Set(g.flatMap(x=> x.e.points.map(p=> unitKey(p.unit||''))));
     // لو سعر الوحدة متقارب يبقى الفرق في كتابة الوحدة بس (كيلو/بدون وحدة، UNITS/PKTS) — آمن يتدمج تلقائي
     const lastUP = g.map(x=> { const pts = x.e.points.filter(p=> p.unitPrice > 0); return pts.length ? pts[pts.length-1].unitPrice : 0; }).filter(v=> v > 0);
     const priceClose = lastUP.length > 1 && Math.max(...lastUP) / Math.min(...lastUP) <= 1.12;
@@ -2115,6 +2119,40 @@ function findProductDuplicateGroups(){
   window.__dhProdGroups = out.filter(g=> !g.packs);
   window.__dhProdPacks = out.filter(g=> g.packs);
   return window.__dhProdGroups;
+}
+// دمج تلقائي للعبوات: لو نسبة السعرين = محتوى العبوة المكتوب في الاسم (5 Kg Bkt، 2*5Kg، 25KG) ⇒ نحوّل الكمية للوحدة الأساسية
+function dhAutoPackPlan(){
+  const plan = [];
+  (window.__dhProdPacks||[]).forEach(g=>{
+    const t = g.entries[0]; const tPts = t.points.filter(p=> p.unitPrice > 0); if(!tPts.length) return;
+    const tUP = tPts[tPts.length-1].unitPrice, tU = unitKey(t.unit);
+    const pk = parsePackFromName(t.displayName, 'CTN'); if(!pk || !(pk.amount > 1)) return;
+    g.entries.slice(1).forEach(e=>{
+      const ePts = e.points.filter(p=> p.unitPrice > 0); if(!ePts.length) return;
+      const r = ePts[ePts.length-1].unitPrice / tUP;
+      const eU = unitKey(e.unit);
+      let f = null;
+      if(Math.abs(r / pk.amount - 1) <= 0.04 && tU === 'KG' || Math.abs(r / pk.amount - 1) <= 0.04 && tU === 'L') f = pk.amount;            // الهدف كيلو والتاني عبوة
+      else if(Math.abs(r * pk.amount - 1) <= 0.04 && (eU === 'KG' || eU === 'L')) f = 1 / pk.amount;                                         // الهدف عبوة والتاني كيلو
+      if(!f) return;
+      plan.push({ from: e, to: t, f, label: `${e.displayName} (${e.unit||'—'}) ⟵ ${f >= 1 ? '× ' + Math.round(f*1000)/1000 : '÷ ' + Math.round(1/f*1000)/1000} ${t.unit||''}` });
+    });
+  });
+  return plan;
+}
+async function dhAutoPackRun(btn){
+  const plan = dhAutoPackPlan(); if(!plan.length) return;
+  btn.disabled = true; btn.textContent = 'جاري الدمج...';
+  let n = 0;
+  try{
+    for(const x of plan){
+      for(const p of x.from.points){ if(!p.id) continue;
+        const { error } = await sb.from('invoice_items').update({ name: x.to.displayName, qty: Math.round(p.qty * x.f * 10000) / 10000, unit: x.to.unit || null }).eq('id', p.id);
+        if(error) throw error; n++; }
+    }
+    await refreshInvoicesFromServer(); renderAll(); if(typeof dhRender === 'function') dhRender();
+    setTimeout(()=> alert(`✓ اتدمج ${plan.length} صنف (${n} سطر) — الإجمالي زي ما هو، الكمية بس اتحوّلت للوحدة الأساسية.`), 50);
+  }catch(e){ console.error(e); alert('فشل الدمج: ' + (e.message || e)); btn.disabled = false; btn.textContent = 'دمج تلقائي'; }
 }
 function findSupplierDuplicateGroups(counts){
   const names = [...counts.keys()].filter(n=> n !== UNNAMED_SUPPLIER_LABEL);
@@ -4772,7 +4810,7 @@ function dhRender(){
       <div class="dh-group">${g.entries.map(e=> `<div dir="auto" style="font-size:13px;padding:2px 0;">${escapeHtml(e.displayName)} <small style="color:var(--ink-soft);">· ${escapeHtml(e.unit||'بدون وحدة')} · ${e.points.length} سجل · آخر سعر ${fmtPrice(e.points[e.points.length-1].unitPrice)}</small></div>`).join('')}
         <div style="display:flex;gap:10px;margin-top:4px;">${act(`<button class="ap-link" data-mergeprod="${escapeHtml(g.id)}">تعديل يدوي</button>`)}${act(`<button class="ap-link" data-dismiss="${escapeHtml(g.id)}">مش نفس الصنف</button>`)}</div>
       </div>`).join(''), 'err')}
-    ${(window.__dhProdPacks||[]).length ? `<div class="dh-sec done" style="opacity:1;"><div class="dh-body" style="border:none;background:none;font-size:12px;color:var(--ink-soft);line-height:1.8;">ℹ️ فيه ${window.__dhProdPacks.length} صنف بنفس الاسم بس بعبوات مختلفة وسعر مختلف (زي TIN و PAIL، أو كرتونة وحبة) — دول سايبهم منفصلين ومش محسوبين مشكلة. <a href="#" data-toggle="packs">${dh.open.has('packs') ? 'اخفيهم' : 'اعرضهم'}</a>${dh.open.has('packs') ? window.__dhProdPacks.map(g=> `<div style="margin-top:6px;">${g.entries.map(e=> `<span dir="auto">${escapeHtml(e.displayName)} (${escapeHtml(e.unit||'بدون وحدة')} · ${fmtPrice(e.points[e.points.length-1].unitPrice)})</span>`).join(' / ')} ${act(`<a href="#" data-mergeprod="${escapeHtml(g.id)}">دمج بمعامل تحويل</a>`)}</div>`).join('') : ''}</div></div>` : ''}
+    ${(window.__dhProdPacks||[]).length ? `<div class="dh-sec done" style="opacity:1;"><div class="dh-body" style="border:none;background:none;font-size:12px;color:var(--ink-soft);line-height:1.8;">ℹ️ فيه ${window.__dhProdPacks.length} صنف بنفس الاسم بس بعبوات مختلفة وسعر مختلف (زي TIN و PAIL، أو كرتونة وحبة) — دول سايبهم منفصلين ومش محسوبين مشكلة.${(()=>{ const ap = dhAutoPackPlan(); return ap.length && currentWorkspace && currentWorkspace.role === 'owner' ? ` <b>${ap.length} منهم البرنامج عارف يحوّلهم لوحده</b> (نسبة السعرين = محتوى العبوة المكتوب في الاسم): <button class="ap-link" id="dhAutoPackBtn" title="${escapeHtml(ap.map(x=> x.label).join('\n'))}">دمج تلقائي (${ap.length})</button> ·` : ''; })()} <a href="#" data-toggle="packs">${dh.open.has('packs') ? 'اخفيهم' : 'اعرضهم'}</a>${dh.open.has('packs') ? window.__dhProdPacks.map(g=> `<div style="margin-top:6px;">${g.entries.map(e=> `<span dir="auto">${escapeHtml(e.displayName)} (${escapeHtml(e.unit||'بدون وحدة')} · ${fmtPrice(e.points[e.points.length-1].unitPrice)})</span>`).join(' / ')} ${act(`<a href="#" data-mergeprod="${escapeHtml(g.id)}">دمج بمعامل تحويل</a>`)}</div>`).join('') : ''}</div></div>` : ''}
     ${sec('outliers','سعر وحدة غريب','سعر الوحدة بعيد جدًا عن العادي لنفس الصنف — غالبًا الكمية أو السعر اتقرا غلط', c.outliers.length, c.outliers.slice(0,100).map(o=> invRow(o.inv,
       `<span dir="auto">${escapeHtml(o.name)}</span>: ${apFmt(o.p.price)} ÷ ${o.p.qty} = <b>${fmtPrice(o.p.unitPrice)}</b> للوحدة، والعادي حوالي <b>${fmtPrice(o.med)}</b> (${o.ratio >= 1 ? 'أغلى ' + Math.round(o.ratio) + ' مرات' : 'أرخص ' + Math.round(1/o.ratio) + ' مرات'})`,
       act(`<button class="ap-link" data-dismiss="out:${escapeHtml(String(o.p.id))}">سليم</button>`))).join(''), 'err')}
@@ -4787,7 +4825,7 @@ function dhRender(){
 (function dhWire(){
   const root = document.getElementById('dhRoot');
   root.addEventListener('click', async (e)=>{
-    const t = e.target.closest('[data-toggle],[data-edit],[data-del],[data-dismiss],[data-open],[data-reset],[data-mergeprod],[data-mergeprodall],[data-siopen]'); if(!t) return; if(t.tagName==='A') e.preventDefault();
+    const t = e.target.closest('[data-toggle],[data-edit],[data-del],[data-dismiss],[data-open],[data-reset],[data-mergeprod],[data-mergeprodall],[data-siopen],#dhAutoPackBtn'); if(!t) return; if(t.tagName==='A') e.preventDefault();
     if(t.dataset.toggle){ const k = t.dataset.toggle; dh.open.has(k) ? dh.open.delete(k) : dh.open.add(k); return dhRender(); }
     if(t.dataset.edit) return openEditInvoice(t.dataset.edit);
     if(t.dataset.dismiss){ dh.dismissed.add(t.dataset.dismiss); dhSaveDismissed(); return dhRender(); }
@@ -4811,6 +4849,7 @@ function dhRender(){
       }catch(err){ console.error(err); alert('فشل الدمج: ' + (err.message || err)); dhRender(); }
       return;
     }
+    if(t.id === 'dhAutoPackBtn'){ e.preventDefault(); return dhAutoPackRun(t); }
     if(t.dataset.mergeprod){ const g = (window.__dhProdGroups||[]).concat(window.__dhProdPacks||[]).find(x=> x.id === t.dataset.mergeprod); if(g) openMergeEditModal(g.entries); return; }
     if(t.dataset.open === 'terms') return openSupplierDestModal();
     if(t.dataset.del){
