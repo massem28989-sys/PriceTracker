@@ -4778,6 +4778,7 @@ function dhRender(){
     ${sec('dates','تواريخ مشكوك فيها','تاريخ ناقص أو في المستقبل أو أقدم من سنة — غالبًا اتقرا غلط', c.dates.length, c.dates.map(d=> invRow(d.inv, escapeHtml(d.why), act(`<button class="ap-link" data-dismiss="date:${escapeHtml(String(d.inv.id))}">التاريخ صح</button>`))).join(''), 'err')}
     ${sec('empty','فواتير فاضية أو إجماليها صفر','', c.empty.length, c.empty.map(inv=> invRow(inv, '', act(`<button class="ap-btn danger" data-del="${escapeHtml(String(inv.id))}">امسحها</button>`))).join(''), 'err')}
     ${sec('noStore','فواتير من غير مورد','', c.noStore.length, c.noStore.map(inv=> invRow(inv)).join(''), 'err')}
+    ${(()=>{ const wp = (typeof rcRenamePlan === 'function') ? rcRenamePlan() : []; return wp.length ? sec('whNames','أصناف متسجلة باسم المخزن','نفس الصنف ظاهر باسمين (اسم المخزن واسم فاتورة المورد) — وحّدهم عشان الأسعار شهر بشهر تبقى خط واحد', wp.length, `<div id="rcRenameBox">${rcRenameNote()}</div>`, 'warn') : ''; })()}
     ${sec('noNumber','فواتير من غير رقم','البرنامج مش هيقدر يمنع تكرارها أو يطابقها مع كشف الحساب', c.noNumber.length, (c.noNumber.length ? `<div style="font-size:13px;line-height:1.9;margin:4px 0 10px;background:var(--paper-raised);border:1px solid var(--line);border-radius:5px;padding:8px 12px;">مش محتاج تراجعهم واحدة واحدة: ارفع <b>كشف حساب</b> كل مورد من تبويب "كشف حساب الموردين"، والبرنامج هيملا الأرقام لوحده من الكشف لأي فاتورة مبلغها وتاريخها مطابقين.<br>${[...c.noNumber.reduce((m,inv)=> m.set(inv.store||'—', (m.get(inv.store||'—')||0)+1), new Map()).entries()].sort((a,b)=> b[1]-a[1]).map(([st,n])=> `<span style="display:inline-block;margin-inline-end:14px;" dir="auto">${escapeHtml(st)}: <b>${n}</b></span>`).join('')}<br><b>حسب الشهر:</b> ${[...c.noNumber.reduce((m,inv)=> { const k = (inv.date||'').slice(0,7) || 'من غير تاريخ'; return m.set(k, (m.get(k)||0)+1); }, new Map()).entries()].sort((a,b)=> a[0].localeCompare(b[0])).map(([k,n])=> `<span style="display:inline-block;margin-inline-end:14px;">${escapeHtml(k)}: <b>${n}</b></span>`).join('')}<br>أو ارفع صور فواتير الشهر ده تاني من "+ إضافة فواتير": أي فاتورة متسجلة من غير رقم هيتسجل رقمها على السجل القديم من غير ما تتكرر.</div>` : '') + c.noNumber.map(inv=> invRow(inv, '', act(`<button class="ap-link" data-dismiss="nonum:${escapeHtml(String(inv.id))}">مالهاش رقم فعلًا</button>`))).join(''), 'warn')}
     ${dh.dismissed.size ? `<div style="margin-top:10px;"><button class="ap-link" data-reset="1">رجّع كل اللي اتعلّم عليه "سليم" (${dh.dismissed.size})</button></div>` : ''}`;
   dhUpdateBadge();
@@ -4933,13 +4934,16 @@ function rcDays(a, b){ return Math.round((new Date(a+'T00:00:00') - new Date(b+'
 // ---------- ربط كود صنف المخزن باسم الصنف في الفاتورة ----------
 let itemLinks = new Map();   // كود المخزن -> Set(اسم الفاتورة بعد التوحيد)
 let itemLinksMissing = false;
+let itemLinkWh = new Map();  // اسم المخزن (موحّد) -> كود — محفوظ مع الربط، عشان التوحيد يشتغل من غير الملف
 const ilKey = (n)=> canonProductName(n);
 async function itemLinksLoad(){
   itemLinks = new Map(); itemLinksMissing = false;
   if(!currentWorkspace) return;
-  const { data, error } = await sbAll(()=> sb.from('item_links').select('wh_code, inv_name').eq('workspace_id', currentWorkspace.id).order('wh_code').order('inv_name'));
+  itemLinkWh = new Map();
+  let { data, error } = await sbAll(()=> sb.from('item_links').select('wh_code, inv_name, wh_name').eq('workspace_id', currentWorkspace.id).order('wh_code').order('inv_name'));
+  if(error && /wh_name/i.test(error.message||'')) ({ data, error } = await sbAll(()=> sb.from('item_links').select('wh_code, inv_name').eq('workspace_id', currentWorkspace.id).order('wh_code').order('inv_name')));
   if(error){ itemLinksMissing = /relation|does not exist|schema cache|Could not find/i.test(error.message||''); if(!itemLinksMissing) console.error(error); return; }
-  (data||[]).forEach(r=> ilAddLocal(r.wh_code, r.inv_name));
+  (data||[]).forEach(r=>{ ilAddLocal(r.wh_code, r.inv_name); if(r.wh_name) itemLinkWh.set(ilKey(r.wh_name), String(r.wh_code)); });
 }
 function ilAddLocal(code, name){ const k = ilKey(name); if(!code || !k) return false; let s = itemLinks.get(String(code)); if(!s){ s = new Set(); itemLinks.set(String(code), s); } if(s.has(k)) return false; s.add(k); return true; }
 function ilNameKnown(name){ const k = ilKey(name); for(const s of itemLinks.values()) if(s.has(k)) return true; return false; }
@@ -4981,7 +4985,8 @@ function rcFit(rec, inv){
 async function rcLearn(rows){
   if(!(currentWorkspace && currentWorkspace.role === 'owner')) return 0;
   const add = [];
-  rows.forEach(r=>{ if(!r.rec || !r.invs.length) return; r.invs.forEach(inv=> rcPairLines(r.rec, inv).forEach(p=>{ if(p.rec.code && ilKey(p.inv.name) !== ilKey(p.rec.name) && ilAddLocal(p.rec.code, p.inv.name)) add.push({ workspace_id: currentWorkspace.id, wh_code: String(p.rec.code), inv_name: ilKey(p.inv.name), wh_name: p.rec.name || '' }); })); });
+  rows.forEach(r=>{ if(!r.rec || !r.invs.length) return; r.invs.forEach(inv=> rcPairLines(r.rec, inv).forEach(p=>{ if(p.rec.code && p.rec.name && ilKey(p.inv.name) !== ilKey(p.rec.name)) itemLinkWh.set(ilKey(p.rec.name), String(p.rec.code));
+      if(p.rec.code && ilKey(p.inv.name) !== ilKey(p.rec.name) && ilAddLocal(p.rec.code, p.inv.name)) add.push({ workspace_id: currentWorkspace.id, wh_code: String(p.rec.code), inv_name: ilKey(p.inv.name), wh_name: p.rec.name || '' }); })); });
   if(add.length && !itemLinksMissing){
     for(let i = 0; i < add.length; i += 200){ const { error } = await sb.from('item_links').upsert(add.slice(i, i+200)); if(error){ if(/relation|does not exist|schema cache|Could not find/i.test(error.message||'')) itemLinksMissing = true; else console.error(error); break; } }
   }
@@ -4995,9 +5000,8 @@ async function rcUnlearn(rec, inv){
 }
 // ---------- توحيد أسماء الأصناف: اللي متسجل باسم المخزن ⟵ اسمه في فواتير المورد ----------
 function rcRenamePlan(){
-  if(!rc.allRecs) return [];
-  const whCode = new Map(); // اسم المخزن (موحّد) -> كود
-  rc.allRecs.forEach(r=> r.items.forEach(it=> { if(it.name && it.code) whCode.set(ilKey(it.name), String(it.code)); }));
+  const whCode = new Map(itemLinkWh); // اسم المخزن (موحّد) -> كود
+  (rc.allRecs || []).forEach(r=> r.items.forEach(it=> { if(it.name && it.code) whCode.set(ilKey(it.name), String(it.code)); }));
   const plan = new Map(); // from name -> {to, ids:[]}
   invoices.forEach(inv=> (inv.items||[]).forEach(it=>{
     const code = whCode.get(ilKey(it.name)); if(!code || !itemLinks.has(code)) return;
@@ -5026,6 +5030,7 @@ document.addEventListener('click', async (e)=>{
         n += o.ids.length;
       }
       await refreshInvoicesFromServer(); renderAll();
+      if(typeof dhRender === 'function' && els.healthView && els.healthView.style.display === 'block'){ dhRender(); setTimeout(()=> alert(`✓ اتوحّد اسم ${n} سطر.`), 50); return; }
       const box = document.getElementById('rcRenameBox'); if(box) box.innerHTML = `<div style="font-size:12px;color:var(--pine-deep);margin-top:4px;">✓ اتوحّد اسم ${n} سطر.</div>` + rcRenameNote();
     }catch(err){ console.error(err); alert('فشل التوحيد: ' + (err.message || err)); btn.disabled = false; btn.textContent = 'وحّد الأسماء'; }
   }
