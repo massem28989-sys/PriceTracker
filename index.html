@@ -4868,7 +4868,7 @@ function parseReceiptsFlat(rows){
     if(idx(/^رقم السند$/) >= 0 && idx(/^كود الصنف$/) >= 0){
       h = i;
       col = { date: idx(/^(تاريخ|التاريخ)$/), no: idx(/^رقم السند$/), supCode: idx(/^كود المورد$/), supName: idx(/^اسم المورد$/), code: idx(/^كود الصنف$/), name: idx(/^(اسم|أسم) الصنف$/),
-        qty: idx(/^الكمية$/), unit: idx(/^الوحدة$/), price: idx(/^(سعر الوحدة في الفاتورة|السعر|سعر الوحدة)$/), total: idx(/^(الإجمالي|الأجمالى|الاجمالي)$/) };
+        qty: idx(/^الكمية$/), unit: idx(/^الوحدة$/), pack: idx(/^العبوة/), price: idx(/^(سعر الوحدة في الفاتورة|السعر|سعر الوحدة)$/), total: idx(/^(الإجمالي|الأجمالى|الاجمالي)$/) };
       break;
     }
   }
@@ -4885,7 +4885,7 @@ function parseReceiptsFlat(rows){
       rec = { no: n, date: col.date >= 0 ? rcDate(r[col.date]) : '', supCode: code && !cash ? String(parseInt(code,10)) : '', supName: col.supName >= 0 ? rcCell(r[col.supName]) : '', cash, items: [], total: 0 };
       byNo.set(n, rec);
     }
-    rec.items.push({ code: rcCell(r[col.code]), name: col.name >= 0 ? rcCell(r[col.name]) : '', qty: parseFloat(rcCell(r[col.qty])) || 0, unit: col.unit >= 0 ? rcCell(r[col.unit]) : '', price: parseFloat(rcCell(r[col.price])) || 0, total: tot });
+    rec.items.push({ code: rcCell(r[col.code]), name: col.name >= 0 ? rcCell(r[col.name]) : '', qty: parseFloat(rcCell(r[col.qty])) || 0, unit: col.unit >= 0 ? rcCell(r[col.unit]) : '', pack: col.pack >= 0 ? (parseFloat(rcCell(r[col.pack])) || 1) : 1, price: parseFloat(rcCell(r[col.price])) || 0, total: tot });
     rec.total += tot;
   }
   const recs = [...byNo.values()]; recs.forEach(r=> r.total = Math.round(r.total * 100) / 100);
@@ -5077,11 +5077,16 @@ function rcImportOpen(months){
 async function rcImportRun(){
   const { plan } = rc.importPlan; const st = document.getElementById('rcImpStatus'); const btn = document.getElementById('rcImpGo'); btn.disabled = true;
   const supMap = new Map(); document.querySelectorAll('[data-impsup]').forEach(s=> supMap.set(s.dataset.impsup, s.value));
+  // المخزن ساعات بيسجل الصنف بالكرتونة وساعات بالقطعة ⇒ نحوّل الكمية للعبوة الأكتر استخدامًا للصنف ده
+  const packCnt = new Map();
+  (rc.allRecs || []).forEach(x=> x.items.forEach(it=>{ if(!it.price) return; const m = packCnt.get(it.code) || new Map(); m.set(it.pack||1, (m.get(it.pack||1)||0) + 1); packCnt.set(it.code, m); }));
+  const domPack = (code, p)=>{ const m = packCnt.get(code); return m ? [...m.entries()].sort((a,b)=> b[1]-a[1])[0][0] : p; };
   let ok = 0, fail = 0;
   for(const r of plan.recs){
     const k = r.cash ? 'مورد نقدي' : (r.supName || ('كود ' + r.supCode));
     const store = supMap.get(k) || k;
-    const items = r.items.map(it=> ({ name: rcPrettyName(it.code, it.name || it.code), qty: it.qty || 1, unit: it.unit || '', price: Math.round(it.total * 100) / 100 }));
+    const items = r.items.map(it=>{ const p = it.pack || 1, d = domPack(it.code, p); const q = (it.qty || 1) * p / d;
+      return { name: rcPrettyName(it.code, it.name || it.code), qty: Math.round(q * 10000) / 10000, unit: it.unit || '', price: Math.round(it.total * 100) / 100 }; });
     const vat = supplierVatRatesMap.has(store) ? supplierVatRatesMap.get(store) : 5;
     const pay = r.cash ? 'cash' : ((supplierPaymentMap.get(store) || {}).type || '');
     try{ const id = await insertInvoiceRemote(store, r.date, items, vat, '', pay); await saveReceiptNumber(id, r.no); ok++; }
